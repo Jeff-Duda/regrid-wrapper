@@ -59,16 +59,22 @@ def resize_nc(
             for dim in src.dimensions:
                 size = get_aliased_key(new_sizes, dim)
                 dst.createDimension(dim, size=size)
-            for varname, var in src.variables.items():
-                fill_value = (
-                    getattr(var, "_FillValue") if hasattr(var, "_FillValue") else None
-                )
-                new_var = dst.createVariable(
-                    varname, var.dtype, var.dimensions, fill_value=fill_value
-                )
-                copy_nc_attrs(var, new_var)
-                if copy_values_for and varname in copy_values_for:
-                    new_var[:] = var[:]
+            for varname in src.variables.keys():
+                copy_data = varname in copy_values_for
+                copy_nc_variable(src, dst, varname, copy_data=copy_data)
+
+
+def copy_nc_variable(
+    src: nc.Dataset, dst: nc.Dataset, varname: str, copy_data: bool = False
+) -> None:
+    var = src.variables[varname]
+    fill_value = getattr(var, "_FillValue") if hasattr(var, "_FillValue") else None
+    new_var = dst.createVariable(
+        varname, var.dtype, var.dimensions, fill_value=fill_value
+    )
+    copy_nc_attrs(var, new_var)
+    if copy_data:
+        new_var[:] = var[:]
 
 
 NameListType = Tuple[str, ...]
@@ -97,7 +103,7 @@ class Dimension(BaseModel):
     lower: int
     upper: int
     staggerloc: int
-    coordinate_type: Literal["y", "x", "time"]
+    coordinate_type: Literal["y", "x", "time", "cell", "level"]
 
 
 class DimensionCollection(BaseModel):
@@ -138,8 +144,13 @@ def load_variable_data(
 
 
 def set_variable_data(
-    var: nc.Variable, target_dims: DimensionCollection, target_data: np.ndarray
+    var: nc.Variable,
+    target_dims: DimensionCollection,
+    target_data: np.ndarray,
+    collective: bool = False,
 ) -> np.ndarray:
+    if collective:
+        var.set_collective(True)
     dim_map = create_dimension_map(target_dims)
     axes = [get_aliased_key(dim_map, ii) for ii in var.dimensions]
     transposed_data = target_data.transpose(axes)
@@ -151,6 +162,8 @@ def set_variable_data(
     _LOGGER.debug(f"transposed_data.shape: {transposed_data.shape}")
     _LOGGER.debug(f"slices: {slices}")
     var[*slices] = transposed_data
+    if collective:
+        var.set_collective(False)
     return transposed_data
 
 
