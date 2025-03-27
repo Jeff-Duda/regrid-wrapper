@@ -228,7 +228,6 @@ class RaveToMpasRegridProcessor:
                 dstfield=self._dst_field,
                 regrid_method=esmpy.RegridMethod.BILINEAR,
                 unmapped_action=esmpy.UnmappedAction.IGNORE,
-                ignore_degenerate=False,
                 filename=str(self.context.weight_path),
             )
 
@@ -345,7 +344,7 @@ class RaveToMpasRegridProcessor:
             name=field_name,
             gwrap=self.get_src_gwrap(),
             dim_time=("Time",),
-            dim_level=("bottom_top"),
+            dim_level=("bottom_top",),
         ).create_field_wrapper()
         src_data = src_fwrap.value.data
         src_data[:] = np.where(src_data < 0.0, 0.0, src_data)

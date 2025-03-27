@@ -375,8 +375,15 @@ class NcToField(BaseModel):
                         value=list(self.gwrap.dims.value) + [time_dim]
                     )
                 else:
-                    print("dim_level is not None, printing")
-                    print(self.dim_level)
+                    ndbounds = (len(get_nc_dimension(ds, self.dim_time)),)
+                    time_dim = Dimension(
+                        name=self.dim_time,
+                        size=ndbounds[0],
+                        lower=0,
+                        upper=ndbounds[0],
+                        staggerloc=self.staggerloc,
+                        coordinate_type="time",
+                    )
                     ndbounds = (len(get_nc_dimension(ds, self.dim_level)),)
                     level_dim = Dimension(
                         name=self.dim_level,
@@ -388,13 +395,20 @@ class NcToField(BaseModel):
                     )
                     target_dims = DimensionCollection(
                         value=list(self.gwrap.dims.value) + [level_dim] + [time_dim]
-                )
+                    )
+                    ndbounds = (len(get_nc_dimension(ds, self.dim_level)),len(get_nc_dimension(ds, self.dim_time)),)
             field = esmpy.Field(
                 self.gwrap.value,
                 name=self.name,
                 ndbounds=ndbounds,
                 staggerloc=self.staggerloc,
             )
+            print("JLS, target dims")
+            print(target_dims)
+            print("self.name")
+            print(self.name)
+            print("field")
+            print(field) 
             field.data[:] = load_variable_data(ds.variables[self.name], target_dims)
             fwrap = FieldWrapper(value=field, dims=target_dims, gwrap=self.gwrap)
             return fwrap
