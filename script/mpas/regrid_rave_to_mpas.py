@@ -131,11 +131,10 @@ class RaveToMpasRegridContext(BaseModel):
     def rave_fields(self) -> tuple[AbstractRaveField, ...]:
         field_names = ("FRE", "FRP_MEAN", "PM25", "NH3", "SO2")
         rave_fields = []
-        with open_nc(self.src_path, mode="r+") as ds:
+        with open_nc(self.src_path, mode="r") as ds:
             for field_name in field_names:
                 if field_name in ("PM25", "NH3", "SO2"):
                    var = ds.variables[field_name]
-                   print(type(var))
                 else:
                    var = ds.variables[field_name]
                 init_data = {
@@ -245,7 +244,7 @@ class RaveToMpasRegridProcessor:
         _LOGGER.info("create output file")
         ncells_size = self.context.num_cells #130333  # tdk: pull from origin
         if self.context.rank == 0:
-            with open_nc(self.context.new_dst_path, mode="w", parallel=False) as dst_nc:
+            with open_nc(self.context.new_dst_path, mode="w", clobber=True, parallel=False) as dst_nc:
                 dst_nc.createDimension("nCells", ncells_size)
                 dst_nc.createDimension("nkfire", 1)
                 dst_nc.createDimension("Time")
@@ -253,18 +252,20 @@ class RaveToMpasRegridProcessor:
                 dst_nc.setncattr("src_path", str(self.context.src_path))
                 dst_nc.setncattr("dst_path", str(self.context.dst_path))
                 with open_nc(self.context.dst_path, mode="r", parallel=False) as src_nc:
-                    for varname in ("latCell", "lonCell"):
+                    #area = np.asarray(src_nc.variables['areaCell'])
+                    for varname in ("latCell", "lonCell","areaCell"):
                         copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
 
         regridder = self.get_regridder()
         for rave_field in self.context.rave_fields:
             _LOGGER.info(f"regridding {rave_field.name=}")
             src_fwrap = self.create_src_field_wrapper(field_name=rave_field.name)
+
             dst_field = self.get_dst_field()
             # tdk: any more qa stuff? minimum threshold?
             dst_field.data.fill(0.0)
             regridder(src_fwrap.value, dst_field)
-
+# IF FRP/FRE, need to convert back to W from W/m2
             # tdk: support NcToMesh
             local_bounds = (dst_field.lower_bounds[0], dst_field.upper_bounds[0])
             reconciled_bounds = reconcile_bounds(local_bounds)
@@ -272,6 +273,7 @@ class RaveToMpasRegridProcessor:
             _LOGGER.info(f"{dims=}")
             _LOGGER.info(f"writing field to netcdf")
             with open_nc(self.context.new_dst_path, mode="a") as ds:
+                area = np.asarray(ds.variables['areaCell'])
                 var = ds.createVariable(
                     rave_field.name,
                     rave_field.dtype,
@@ -280,13 +282,14 @@ class RaveToMpasRegridProcessor:
                 )
                 for k, v in rave_field.attrs.items():
                     setattr(var, k, v)
+
                 set_variable_data(
                     var,
                     dims,
-                    rave_field.reshape_field_data(dst_field.data),
+                    rave_field.reshape_field_data(dst_field.data)*reshape_field_data(area),
                     collective=True,
                 )
-
+    
             src_fwrap.value.destroy()
             del src_fwrap
 
@@ -353,8 +356,21 @@ class RaveToMpasRegridProcessor:
             gwrap=self.get_src_gwrap(),
             dim_time=("time",),
         ).create_field_wrapper()
+# Get the area from the file, need to convert from /grid to /m2
+        area_fwrap = NcToField(
+            path=self.context.src_path,
+            name='area',
+            gwrap=self.get_src_gwrap(),
+            dim_time=None,
+        ).create_field_wrapper()
+
         src_data = src_fwrap.value.data
-        src_data[:] = np.where(src_data < 0.0, 0.0, src_data)
+        area_data = area_fwrap.value.data
+        if field_name in ("PM25", "NH3", "SO2"):
+            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis]/3600.)
+        else:
+            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis])
+        src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis])
         return src_fwrap
 
     def get_src_gwrap(self) -> GridWrapper:
