@@ -352,6 +352,7 @@ class NcToField(BaseModel):
     name: str
     gwrap: GridWrapper
     dim_time: NameListType | None = None
+    dim_level: NameListType | None = None
     staggerloc: int = esmpy.StaggerLoc.CENTER
 
     def create_field_wrapper(self) -> FieldWrapper:
@@ -360,25 +361,33 @@ class NcToField(BaseModel):
                 ndbounds = None
                 target_dims = self.gwrap.dims
             else:
-                ndbounds = (len(get_nc_dimension(ds, self.dim_time)),)
-                time_dim = Dimension(
-                    name=self.dim_time,
-                    size=ndbounds[0],
-                    lower=0,
-                    upper=ndbounds[0],
-                    staggerloc=self.staggerloc,
-                    coordinate_type="time",
-                )
-                #level_dim = Dimension(
-                #    name=self.dim_level,
-                #    size=ndbounds[0],
-                #    lower=0,
-                #    upper=ndbounds[0],
-                #    staggerloc=self.staggerloc,
-                #    coordinate_type="level",
-                #)
-                target_dims = DimensionCollection(
-                    value=list(self.gwrap.dims.value) + [time_dim]
+                if self.dim_level is None:
+                    ndbounds = (len(get_nc_dimension(ds, self.dim_time)),)
+                    time_dim = Dimension(
+                        name=self.dim_time,
+                        size=ndbounds[0],
+                        lower=0,
+                        upper=ndbounds[0],
+                        staggerloc=self.staggerloc,
+                        coordinate_type="time",
+                    )
+                    target_dims = DimensionCollection(
+                        value=list(self.gwrap.dims.value) + [time_dim]
+                    )
+                else:
+                    print("dim_level is not None, printing")
+                    print(self.dim_level)
+                    ndbounds = (len(get_nc_dimension(ds, self.dim_level)),)
+                    level_dim = Dimension(
+                        name=self.dim_level,
+                        size=ndbounds[0],
+                        lower=0,
+                        upper=ndbounds[0],
+                        staggerloc=self.staggerloc,
+                        coordinate_type="level",
+                    )
+                    target_dims = DimensionCollection(
+                        value=list(self.gwrap.dims.value) + [level_dim] + [time_dim]
                 )
             field = esmpy.Field(
                 self.gwrap.value,

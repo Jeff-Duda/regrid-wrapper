@@ -45,7 +45,7 @@ class AbstractRaveField(ABC, BaseModel):
     def time_dimension(self) -> Dimension:
         return Dimension(
             name=("Time",),
-            size=1,
+            size=12,
             lower=0,
             upper=1,
             staggerloc=esmpy.StaggerLoc.CENTER,
@@ -189,14 +189,14 @@ class RaveToMpasRegridProcessor:
         self._src_gwrap = NcToGrid(
             path=self.context.src_path,
             spec=GridSpec(
-                x_center="XLONG_M",
-                y_center="XLAT_M",
+                x_center="XLONG",
+                y_center="XLAT",
                 x_dim=("west_east",),
                 y_dim=("south_north",),
-                x_corner="XLONG_C",
-                y_corner="XLAT_C",
-                x_corner_dim=("west_east_stag",),
-                y_corner_dim=("south_north_stag",),
+                x_corner=None, #"XLONG_C",
+                y_corner=None, #"XLAT_C",
+                x_corner_dim=None, #("west_east_stag",),
+                y_corner_dim=None, #("south_north_stag",),
             ),
         ).create_grid_wrapper()
 
@@ -345,6 +345,7 @@ class RaveToMpasRegridProcessor:
             name=field_name,
             gwrap=self.get_src_gwrap(),
             dim_time=("Time",),
+            dim_level=("bottom_top"),
         ).create_field_wrapper()
         src_data = src_fwrap.value.data
         src_data[:] = np.where(src_data < 0.0, 0.0, src_data)
