@@ -142,19 +142,6 @@ def load_variable_data(
     transposed_data = raw_data.transpose(axes)
     return transposed_data
 
-def load_variable_data_and_normalize_by_area(
-    var: nc.Variable, area: nc.Variable, target_dims: DimensionCollection
-) -> np.ndarray:
-    slices = [
-        slice(target_dims.get(ii).lower, target_dims.get(ii).upper)
-        for ii in var.dimensions
-    ]
-    raw_data = var[*slices] / area[*slices]
-    dim_map = {dim: ii for ii, dim in enumerate(var.dimensions)}
-    axes = [get_aliased_key(dim_map, ii.name) for ii in target_dims.value]
-    transposed_data = raw_data.transpose(axes)
-    return transposed_data
-
 
 def set_variable_data(
     var: nc.Variable,
