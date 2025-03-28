@@ -403,12 +403,6 @@ class NcToField(BaseModel):
                 ndbounds=ndbounds,
                 staggerloc=self.staggerloc,
             )
-            print("JLS, target dims")
-            print(target_dims)
-            print("self.name")
-            print(self.name)
-            print("field")
-            print(field) 
             field.data[:] = load_variable_data(ds.variables[self.name], target_dims)
             fwrap = FieldWrapper(value=field, dims=target_dims, gwrap=self.gwrap)
             return fwrap

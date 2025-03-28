@@ -274,6 +274,7 @@ class RaveToMpasRegridProcessor:
             _LOGGER.info(f"writing field to netcdf")
             with open_nc(self.context.new_dst_path, mode="a") as ds:
                 area = np.asarray(ds.variables['areaCell'])
+                area_subset = area[reconciled_bounds[0]:reconciled_bounds[1]]
                 var = ds.createVariable(
                     rave_field.name,
                     rave_field.dtype,
@@ -286,7 +287,7 @@ class RaveToMpasRegridProcessor:
                 set_variable_data(
                     var,
                     dims,
-                    rave_field.reshape_field_data(dst_field.data)*reshape_field_data(area),
+                    rave_field.reshape_field_data(dst_field.data*area_subset),
                     collective=True,
                 )
     
@@ -355,22 +356,25 @@ class RaveToMpasRegridProcessor:
             name=field_name,
             gwrap=self.get_src_gwrap(),
             dim_time=("time",),
+            dim_level=None,
         ).create_field_wrapper()
-# Get the area from the file, need to convert from /grid to /m2
-        area_fwrap = NcToField(
-            path=self.context.src_path,
-            name='area',
-            gwrap=self.get_src_gwrap(),
-            dim_time=None,
-        ).create_field_wrapper()
+# Get the area from the RAVE file, need to convert from /grid to /m2
+        if field_name in ("PM25", "NH3", "SO2", "FRE","FRP_MEAN"):
+            area_fwrap = NcToField(
+                path=self.context.src_path,
+                name='area',
+                gwrap=self.get_src_gwrap(),
+                dim_time=None,
+            ).create_field_wrapper()
+            area_data = area_fwrap.value.data
 
         src_data = src_fwrap.value.data
-        area_data = area_fwrap.value.data
         if field_name in ("PM25", "NH3", "SO2"):
             src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis]/3600.)
-        else:
+        elif field_name in ("FRE","FRP_MEAN"):
             src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis])
-        src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis])
+        else:
+            src_data[:] = np.where(src_data < 0.0, 0.0, src_data)
         return src_fwrap
 
     def get_src_gwrap(self) -> GridWrapper:
@@ -390,12 +394,12 @@ class RaveToMpasRegridProcessor:
 
 
 def main() -> None:
-    data_dir = sys.argv[1] # Top directory of RAVE input data, ../raw/
-    data_name = sys.argv[2]
-    tmp_path = Path(sys.argv[3]) # Top directory of RAVE output data, ../processed/
-    stc_path = sys.argv[4]
-    mesh_name = sys.argv[5]
-    cycle     = sys.argv[6]
+    data_dir     = sys.argv[1] # Top directory of RAVE input data, ../raw/
+    data_name    = sys.argv[2]
+    tmp_path     = Path(sys.argv[3]) # Top directory of RAVE output data, ../processed/
+    stc_path     = sys.argv[4]
+    mesh_name    = sys.argv[5]
+    cycle        = sys.argv[6]
     dates_needed = sys.argv[7:-1]   # +%Y%m%d%H 
 
     rave_src_dir = data_dir

@@ -47,7 +47,7 @@ class AbstractRaveField(ABC, BaseModel):
             name=("Time",),
             size=12,
             lower=0,
-            upper=1,
+            upper=12,
             staggerloc=esmpy.StaggerLoc.CENTER,
             coordinate_type="time",
         )
@@ -59,7 +59,7 @@ class AbstractRaveField(ABC, BaseModel):
             name=("nkemit",),
             size=20,
             lower=0,
-            upper=1,
+            upper=20,
             staggerloc=esmpy.StaggerLoc.CENTER,
             coordinate_type="level",
         )
@@ -103,9 +103,9 @@ class RaveField3d(AbstractRaveField):
     ) -> DimensionCollection:
         return DimensionCollection(
             value=(
-                self.time_dimension,
                 self.create_ncells_dimension(ncells_bounds),
                 self.nkfire_dimension,
+                self.time_dimension,
             )
         )
 
@@ -208,10 +208,12 @@ class RaveToMpasRegridProcessor:
             filename=str(self.context.scrip_path), filetype=esmpy.FileFormat.SCRIP
         )
 
+        # Add in ndbounds here
         _LOGGER.info("create destination field")
         self._dst_field = esmpy.Field(
-            dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT
+            dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT,ndbounds=(20,12)
         )
+       
 
         _LOGGER.info("create regridder")
         if self.context.weight_path.exists():
@@ -228,6 +230,7 @@ class RaveToMpasRegridProcessor:
                 dstfield=self._dst_field,
                 regrid_method=esmpy.RegridMethod.BILINEAR,
                 unmapped_action=esmpy.UnmappedAction.IGNORE,
+                ignore_degenerate=False,
                 filename=str(self.context.weight_path),
             )
 
@@ -240,7 +243,7 @@ class RaveToMpasRegridProcessor:
             with open_nc(self.context.new_dst_path, mode="w", parallel=False) as dst_nc:
                 dst_nc.createDimension("nCells", ncells_size)
                 dst_nc.createDimension("nkemit", 20)
-                dst_nc.createDimension("Time")
+                dst_nc.createDimension("Time",12)
                 dst_nc.setncattr("created_at", str(datetime.now(timezone.utc)))
                 dst_nc.setncattr("src_path", str(self.context.src_path))
                 dst_nc.setncattr("dst_path", str(self.context.dst_path))
@@ -275,7 +278,7 @@ class RaveToMpasRegridProcessor:
                 set_variable_data(
                     var,
                     dims,
-                    rave_field.reshape_field_data(dst_field.data),
+                    dst_field.data,
                     collective=True,
                 )
 
