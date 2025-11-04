@@ -2,12 +2,12 @@
 
 > conda env create -f environment.yaml
 > 
-* Add `REGRID_WRAPPER_LOG_DIR` location to environment or `.env`.
+* Add `REGRID_WRAPPER_LOG_DIR` location to environment.
 
 # Testing
 
 > pytest src/test
 
-For parallel:
+For parallel testing:
 
 > mpirun -n 8 pytest -m mpi src/test

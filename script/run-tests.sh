@@ -2,5 +2,7 @@
 
 set -e
 
-cd /opt/project
+cd ..
+
+pytest src/test
 mpirun -n 8 pytest -m "mpi" src/test

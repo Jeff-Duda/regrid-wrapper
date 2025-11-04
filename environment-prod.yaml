@@ -1,0 +1,14 @@
+name: regrid-wrapper-prod
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - esmpy=8.4.*=mpi_mpich*
+  - xarray
+  - mpi4py=3.1.*
+  - numpy=1.23.*
+  - netcdf4=1.6.*=mpi_mpich*
+  - pytest
+#  - cartopy
+#  - pyremap

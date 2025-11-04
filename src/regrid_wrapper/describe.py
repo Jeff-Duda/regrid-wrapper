@@ -1,11 +1,12 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 import xarray as xr
-from pydantic import BaseModel
 
 
-class DescribeParams(BaseModel):
+@dataclass
+class DescribeParams:
     namespace: str
     files: tuple[Path, ...]
     varnames: tuple[str, ...]

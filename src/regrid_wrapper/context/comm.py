@@ -1,4 +1,5 @@
-from typing import Any, List
+from typing import Any
+
 
 from mpi4py import MPI
 

@@ -1,10 +1,11 @@
 import abc
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple, Literal, Dict, Sequence, Any, Union, List
+from typing import Tuple, Literal, Dict, Sequence, Any, Union
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
 import esmpy
 import netCDF4 as nc
 
@@ -23,14 +24,15 @@ def open_nc(
     parallel: bool = True,
 ) -> nc.Dataset:
     _LOGGER.debug(f"opening {path}")
-    ds = nc.Dataset(
-        path,
+    kwds = dict(
         mode=mode,
         clobber=clobber,
         parallel=parallel,
         comm=MPI.COMM_WORLD,
         info=MPI.Info(),
     )
+    _LOGGER.debug(f"{kwds=}")
+    ds = nc.Dataset(path, **kwds)
     try:
         yield ds
     finally:
@@ -51,7 +53,7 @@ def resize_nc(
     src_path: Path,
     dst_path: Path,
     new_sizes: Dict[str, int],
-    copy_values_for: Sequence[str] | None = None,
+    copy_values_for: Sequence[str] = tuple(),
 ) -> None:
     with open_nc(src_path, mode="r") as src:
         with open_nc(dst_path, mode="w") as dst:
@@ -97,7 +99,8 @@ def get_nc_dimension(ds: nc.Dataset, names: NameListType) -> nc.Dimension:
     return get_aliased_key(ds.dimensions, names)
 
 
-class Dimension(BaseModel):
+@dataclass
+class Dimension:
     name: NameListType
     size: int
     lower: int
@@ -106,7 +109,8 @@ class Dimension(BaseModel):
     coordinate_type: Literal["y", "x", "time", "cell", "level"]
 
 
-class DimensionCollection(BaseModel):
+@dataclass
+class DimensionCollection:
     value: Tuple[Dimension, ...]
 
     def get(self, name: str | NameListType) -> Dimension:
@@ -167,13 +171,13 @@ def set_variable_data(
     return transposed_data
 
 
-class AbstractWrapper(abc.ABC, BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+@dataclass
+class AbstractWrapper(abc.ABC):
     dims: DimensionCollection
 
 
-class GridSpec(BaseModel):
-    model_config = ConfigDict(frozen=True)
+@dataclass
+class GridSpec:
 
     x_center: str
     y_center: str
@@ -186,8 +190,7 @@ class GridSpec(BaseModel):
     x_index: int = 0
     y_index: int = 1
 
-    @model_validator(mode="after")
-    def _validate_model_(self) -> "GridSpec":
+    def __post_init__(self) -> None:
         corner_meta = [
             self.x_corner,
             self.y_corner,
@@ -199,7 +202,6 @@ class GridSpec(BaseModel):
             raise ValueError(
                 "if one corner name is supplied, then all must be supplied"
             )
-        return self
 
     @property
     def has_corners(self) -> bool:
@@ -255,6 +257,7 @@ class GridSpec(BaseModel):
         return DimensionCollection(value=value)
 
 
+@dataclass
 class GridWrapper(AbstractWrapper):
     value: esmpy.Grid
     spec: GridSpec
@@ -275,7 +278,8 @@ class GridWrapper(AbstractWrapper):
             )
 
 
-class NcToGrid(BaseModel):
+@dataclass
+class NcToGrid:
     path: Path
     spec: GridSpec
 
@@ -336,6 +340,7 @@ class NcToGrid(BaseModel):
         return dims
 
 
+@dataclass
 class FieldWrapper(AbstractWrapper):
     value: esmpy.Field
     gwrap: GridWrapper
@@ -347,7 +352,8 @@ class FieldWrapper(AbstractWrapper):
             set_variable_data(var, self.dims, self.value.data)
 
 
-class NcToField(BaseModel):
+@dataclass
+class NcToField:
     path: Path
     name: str
     gwrap: GridWrapper
@@ -396,7 +402,10 @@ class NcToField(BaseModel):
                     target_dims = DimensionCollection(
                         value=list(self.gwrap.dims.value) + [level_dim] + [time_dim]
                     )
-                    ndbounds = (len(get_nc_dimension(ds, self.dim_level)),len(get_nc_dimension(ds, self.dim_time)),)
+                    ndbounds = (
+                        len(get_nc_dimension(ds, self.dim_level)),
+                        len(get_nc_dimension(ds, self.dim_time)),
+                    )
             field = esmpy.Field(
                 self.gwrap.value,
                 name=self.name,
@@ -408,18 +417,14 @@ class NcToField(BaseModel):
             return fwrap
 
 
-class FieldWrapperCollection(BaseModel):
+@dataclass
+class FieldWrapperCollection:
     value: Tuple[FieldWrapper, ...]
 
     def fill_nc_variables(self, path: Path) -> None:
         for fwrap in self.value:
             fwrap.fill_nc_variable(path)
 
-    @field_validator("value", mode="before")
-    @classmethod
-    def _validate_value_(
-        cls, value: Tuple[FieldWrapper, ...]
-    ) -> Tuple[FieldWrapper, ...]:
-        if len(set([id(ii.value.grid) for ii in value])) != 1:
+    def __post_init__(self) -> None:
+        if len(set([id(ii.value.grid) for ii in self.value])) != 1:
             raise ValueError("all fields must share the same grid")
-        return value

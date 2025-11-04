@@ -32,7 +32,7 @@ def init_logging() -> logging.Logger:
         "loggers": {
             project_name: {
                 "handlers": ["default", "file"],
-                "level": ENV.LOG_LEVEL,
+                "level": ENV.REGRID_WRAPPER_LOG_LEVEL,
             },
         },
     }

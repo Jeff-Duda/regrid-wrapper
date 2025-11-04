@@ -1,22 +1,15 @@
 import random
 from contextlib import contextmanager
-from dataclasses import field
 from pathlib import Path
-from typing import Any, Iterator, Sequence, List, Dict
+from typing import Any, Iterator, List
 
 import numpy as np
 import pytest
 import xarray as xr
-from pydantic import BaseModel
 
-from regrid_wrapper.concrete.emi_data import EMI_DATA_ENV
-from regrid_wrapper.concrete.rrfs_dust_data import RRFS_DUST_DATA_ENV
 from regrid_wrapper.context.comm import COMM
 from regrid_wrapper.context.env import ENV
 from regrid_wrapper.context.logging import LOGGER
-from regrid_wrapper.model.spec import (
-    GenerateWeightFileSpec,
-)
 import netCDF4 as nc
 
 TEST_LOGGER = LOGGER.getChild("test")
@@ -32,46 +25,17 @@ def tmp_path_shared(tmp_path: Path) -> Path:
     return Path(COMM.bcast({"path": str(tmp_path)}, root=0)["path"])
 
 
-@pytest.fixture
-def fake_spec(tmp_path_shared: Path) -> GenerateWeightFileSpec:
-    src_path = tmp_path_shared / "src.nc"
-    src_path.touch()
-    dst_path = tmp_path_shared / "dst.nc"
-    dst_path.touch()
-    output_weight_filename = tmp_path_shared / "weights.nc"
-    spec = GenerateWeightFileSpec(
-        name="fake",
-        src_path=src_path,
-        dst_path=dst_path,
-        output_weight_filename=output_weight_filename,
-    )
-    return spec
-
-
-@contextmanager
-def unfreeze_pydantic_models(models: Sequence[BaseModel]) -> Iterator[None]:
-    for model in models:
-        model.model_config["frozen"] = False
-    try:
-        yield
-    finally:
-        for model in models:
-            model.model_config["frozen"] = True
-
-
 @contextmanager
 def custom_env(**kwargs: Any) -> Iterator[None]:
     orig = {}
-    with unfreeze_pydantic_models([ENV]):
-        for k, v in kwargs.items():
-            orig[k] = getattr(ENV, k)
-            setattr(ENV, k, v)
+    for k, v in kwargs.items():
+        orig[k] = getattr(ENV, k)
+        setattr(ENV, k, v)
     try:
         yield
     finally:
-        with unfreeze_pydantic_models([ENV]):
-            for k, v in orig.items():
-                setattr(ENV, k, v)
+        for k, v in orig.items():
+            setattr(ENV, k, v)
 
 
 def create_analytic_data_array(
@@ -163,7 +127,7 @@ def create_veg_map_file(path: Path, field_names: List[str]) -> xr.Dataset:
     return ds
 
 
-DUST_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in RRFS_DUST_DATA_ENV.fields}
+DUST_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in ("foo", "bar")}
 
 
 def create_dust_data_file(path: Path) -> xr.Dataset:
@@ -183,40 +147,11 @@ def create_dust_data_file(path: Path) -> xr.Dataset:
     for coord_name in ["time", "geolat", "geolon"]:
         ds[coord_name].attrs["foo"] = random.random()
 
-    for field_name in RRFS_DUST_DATA_ENV.fields:
+    for field_name in ("foo", "bar"):
         ds[field_name] = create_analytic_data_array(
             ["time", "lat", "lon"], lon_mesh, lat_mesh, ntime=12
         )
         ds[field_name] += DUST_FIELD_OFFSETS[field_name]
-        ds[field_name].attrs["foo"] = random.random()
-    ds.attrs["foo"] = random.random()
-    ds.to_netcdf(path)
-    return ds
-
-
-EMI_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in EMI_DATA_ENV.fields}
-
-
-def create_emi_data_file(path: Path) -> xr.Dataset:
-    if path.exists():
-        raise ValueError(f"path exists: {path}")
-
-    lon = np.linspace(230, 300, 71)
-    lat = np.linspace(25, 50, 26)
-    lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-    ds = xr.Dataset()
-    dims = ["grid_yt", "grid_xt"]
-    ds["grid_latt"] = xr.DataArray(lat_mesh, dims=dims)
-    ds["grid_lont"] = xr.DataArray(lon_mesh, dims=dims)
-
-    for coord_name in ["grid_latt", "grid_lont"]:
-        ds[coord_name].attrs["foo"] = random.random()
-
-    for field_name in EMI_DATA_ENV.fields:
-        ds[field_name] = create_analytic_data_array(
-            ["time", "grid_yt", "grid_xt"], lon_mesh, lat_mesh, ntime=1
-        )
-        ds[field_name] += EMI_FIELD_OFFSETS[field_name]
         ds[field_name].attrs["foo"] = random.random()
     ds.attrs["foo"] = random.random()
     ds.to_netcdf(path)

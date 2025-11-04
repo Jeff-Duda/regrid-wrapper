@@ -1,11 +1,8 @@
 from pathlib import Path
 
 import esmpy
-import numpy as np
 
-from regrid_wrapper.concrete.rrfs_dust_data import RRFS_DUST_DATA_ENV
 from regrid_wrapper.esmpy.field_wrapper import (
-    FieldWrapper,
     NcToGrid,
     NcToField,
     FieldWrapperCollection,
@@ -42,7 +39,7 @@ def fake_field_wrapper_collection(tmp_path_shared: Path) -> FieldWrapperCollecti
     gwrap = nc2grid.create_grid_wrapper()
 
     fwraps = []
-    for name in RRFS_DUST_DATA_ENV.fields:
+    for name in ("foo", "bar"):
         nc2field = NcToField(path=path, name=name, gwrap=gwrap, dim_time=("time",))
         fwrap = nc2field.create_field_wrapper()
         fwraps.append(fwrap)
@@ -130,10 +127,10 @@ class TestFieldWrapperCollection:
 @pytest.mark.mpi
 def test_resize_nc(tmp_path_shared: Path) -> None:
     src_path = create_dust_file(tmp_path_shared)
+    # ncdump(src_path)
     dst_path = tmp_path_shared / "data_resized.nc"
     new_sizes = {"time": 12, "lat": 1, "lon": 2}
     resize_nc(src_path, dst_path, new_sizes)
-    # ncdump(src_path)
     # ncdump(dst_path)
     with open_nc(dst_path, "r") as ds:
         for dim in ds.dimensions:

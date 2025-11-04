@@ -11,7 +11,7 @@ from test.conftest import custom_env, TEST_LOGGER
 
 @pytest.mark.mpi
 def test(tmp_path_shared: Path) -> None:
-    with custom_env(**{"LOG_DIR": str(tmp_path_shared)}):
+    with custom_env(**{"REGRID_WRAPPER_LOG_DIR": str(tmp_path_shared)}):
         logger = init_logging()
         logger.info("hello world")
         COMM.barrier()

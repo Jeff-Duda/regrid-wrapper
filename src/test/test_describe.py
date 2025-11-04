@@ -10,7 +10,7 @@ def test(tmp_path_shared: Path) -> None:
 
     params = DescribeParams(
         files=[data],
-        varnames=["uthr", "sand", "clay", "rdrag", "ssm"],
+        varnames=["foo", "bar"],
         namespace="dust",
         csv_out=tmp_path_shared / "summary.csv",
     )
