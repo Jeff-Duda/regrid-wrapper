@@ -29,6 +29,7 @@ def open_nc(
         clobber=clobber,
         parallel=parallel,
         comm=MPI.COMM_WORLD,
+        format="NETCDF4_CLASSIC",
         info=MPI.Info(),
     )
     try:
