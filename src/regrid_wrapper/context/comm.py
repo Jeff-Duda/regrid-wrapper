@@ -1,7 +1,13 @@
+from enum import IntEnum, unique
 from typing import Any
 
 
 from mpi4py import MPI
+
+
+@unique
+class Tag(IntEnum):
+    SET_VARIABLE_DATA = 1
 
 
 class Comm:
@@ -27,12 +33,18 @@ class Comm:
     def allgather(self, target: Any) -> Any:
         return self._comm.allgather(target)
 
+    def send(self, *args, **kwargs) -> None:
+        self._comm.send(*args, **kwargs)
+
+    def recv(self, *args, **kwargs) -> Any:
+        return self._comm.recv(*args, **kwargs)
+
 
 COMM = Comm()
 
 
 def reconcile_bounds(bounds: tuple[int, int]) -> tuple[int, int]:
-    from regrid_wrapper.context.logging import LOGGER  # tdk: avoid local import
+    from regrid_wrapper.context.logging import LOGGER
 
     LOGGER.debug(f"{bounds=}")
     all_bounds = COMM.allgather(bounds)

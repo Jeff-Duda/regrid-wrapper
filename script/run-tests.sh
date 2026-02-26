@@ -4,5 +4,5 @@ set -e
 
 cd ..
 
-pytest src/test
-mpirun -n 8 pytest -m "mpi" src/test
+pytest -vs src/test
+mpirun -n 8 pytest -vs -m "mpi" src/test

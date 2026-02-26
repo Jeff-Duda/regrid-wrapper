@@ -10,7 +10,8 @@ from mpi4py import MPI
 class Environment:
     REGRID_WRAPPER_LOG_DIR: Path
     REGRID_WRAPPER_LOG_PREFIX: str = "Regrid-Wrapper"
-    REGRID_WRAPPER_LOG_LEVEL: int = logging.DEBUG
+    REGRID_WRAPPER_LOG_LEVEL: int = logging.INFO
+    REGRID_WRAPPER_PARALLEL_NC4: bool = False
 
     def create_log_file_path(self) -> Path:
         comm = MPI.COMM_WORLD

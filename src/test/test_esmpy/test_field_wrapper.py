@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import esmpy
+import numpy as np
 
+from regrid_wrapper.context import comm
 from regrid_wrapper.esmpy.field_wrapper import (
     NcToGrid,
     NcToField,
@@ -9,7 +11,7 @@ from regrid_wrapper.esmpy.field_wrapper import (
     resize_nc,
     open_nc,
     load_variable_data,
-    GridSpec,
+    GridSpec, Dimension, DimensionCollection, set_variable_data_serial,
 )
 from test.conftest import tmp_path_shared, create_dust_data_file, create_rrfs_grid_file
 from regrid_wrapper.common import ncdump
@@ -77,6 +79,7 @@ class TestGridWrapper:
         tmp_path_shared: Path,
         fake_field_wrapper_collection: FieldWrapperCollection,
     ):
+        COMM.barrier()
         gwrap = fake_field_wrapper_collection.value[0].gwrap
         expected = COMM.rank + 1
         staggerloc = esmpy.StaggerLoc.CENTER
@@ -86,11 +89,12 @@ class TestGridWrapper:
         path = tmp_path_shared / DUST_FILENAME
         gwrap.fill_nc_variables(path)
 
-        with open_nc(path) as ds:
-            for varname in [gwrap.spec.x_center, gwrap.spec.y_center]:
-                var = ds.variables[varname]
-                actual = load_variable_data(var, gwrap.dims)
-                assert (expected - actual).sum() == 0
+        if COMM.rank == 0:
+            with open_nc(path, parallel=False) as ds:
+                for varname in [gwrap.spec.x_center, gwrap.spec.y_center]:
+                    var = ds.variables[varname]
+                    actual = load_variable_data(var, gwrap.dims)
+                    assert (expected - actual).sum() == 0
 
 
 class TestFieldWrapper:
@@ -101,6 +105,7 @@ class TestFieldWrapper:
         tmp_path_shared: Path,
         fake_field_wrapper_collection: FieldWrapperCollection,
     ):
+        COMM.barrier()
         fwrap = fake_field_wrapper_collection.value[0]
         expected = COMM.rank + 1
         fwrap.value.data.fill(expected)
@@ -132,6 +137,24 @@ def test_resize_nc(tmp_path_shared: Path) -> None:
     new_sizes = {"time": 12, "lat": 1, "lon": 2}
     resize_nc(src_path, dst_path, new_sizes)
     # ncdump(dst_path)
-    with open_nc(dst_path, "r") as ds:
-        for dim in ds.dimensions:
-            assert ds.dimensions[dim].size == new_sizes[dim]
+    if COMM.rank == 0:
+        with open_nc(dst_path, "r") as ds:
+            for dim in ds.dimensions:
+                assert ds.dimensions[dim].size == new_sizes[dim]
+
+
+def test_set_variable_data_serial(tmp_path_shared: Path) -> None:
+    path = tmp_path_shared / "data.nc"
+    size = COMM.size * 2
+    if COMM.rank == 0:
+        with open_nc(path, "w", parallel=False) as ds:
+            ds.createDimension("foo", size)
+            ds.createVariable("bar", float, ("foo",))[:] = 0.0
+    COMM.barrier()
+    lower = COMM.rank * 2
+    upper = lower + 2
+    dim = Dimension(name=("foo",), size=size, lower=lower, upper=upper, staggerloc=0, coordinate_type="time")
+    expected = np.ones(2) * COMM.rank
+    set_variable_data_serial(path, "bar", DimensionCollection(value=(dim,)), expected)
+    with open_nc(path, "r") as ds:
+        np.testing.assert_equal(ds.variables["bar"][lower:upper], expected)
