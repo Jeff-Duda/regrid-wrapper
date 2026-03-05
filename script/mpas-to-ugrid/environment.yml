@@ -1,0 +1,13 @@
+name: mpas-to-ugrid
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - pydantic
+  - pydantic-settings
+  - typer
+  - pyyaml
+  - python-ulid
+  - uxarray
+  - pytest-mock
+  - cf-xarray

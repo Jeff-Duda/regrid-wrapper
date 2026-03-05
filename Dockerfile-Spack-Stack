@@ -18,9 +18,9 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     coreutils \
     unzip \
-    libopenblas-dev \
-    libopenmpi-dev \
-    libyaml-dev \
+#    libopenblas-dev \
+#    libopenmpi-dev \
+#    libyaml-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y \
