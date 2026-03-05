@@ -137,12 +137,11 @@ def test_resize_nc(tmp_path_shared: Path) -> None:
     new_sizes = {"time": 12, "lat": 1, "lon": 2}
     resize_nc(src_path, dst_path, new_sizes)
     # ncdump(dst_path)
-    if COMM.rank == 0:
-        with open_nc(dst_path, "r") as ds:
-            for dim in ds.dimensions:
-                assert ds.dimensions[dim].size == new_sizes[dim]
+    with open_nc(dst_path, "r") as ds:
+        for dim in ds.dimensions:
+            assert ds.dimensions[dim].size == new_sizes[dim]
 
-
+@pytest.mark.mpi
 def test_set_variable_data_serial(tmp_path_shared: Path) -> None:
     path = tmp_path_shared / "data.nc"
     size = COMM.size * 2

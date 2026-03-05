@@ -5,6 +5,7 @@ load("regrid-wrapper-spack-stack")
 -- load("py-netcdf4/1.7.1.post2")
 -- load(pathJoin("nco", os.getenv("nco_ver") or "5.2.4"))
 
+load("stack-python")
 load("esmf")
 load("py-xarray")
 load("py-netcdf4")

@@ -1,0 +1,42 @@
+# Use a modern Ubuntu base
+FROM ubuntu:latest
+
+# Prevent interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gfortran \
+    wget \
+    git \
+    curl \
+    libtool \
+    m4 \
+    # MPI and NetCDF dependencies
+    libopenmpi-dev \
+    openmpi-bin \
+    libhdf5-openmpi-dev \
+    libnetcdf-dev \
+    # Python build dependencies
+    python3-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for Python package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# 2. Set Environment Variables for ESMF Build
+ENV ESMF_DIR=/src/esmf
+ENV ESMF_COMM=openmpi
+ENV ESMF_COMPILER=gfortran
+ENV ESMF_ABI=64
+ENV ESMF_INSTALL_PREFIX=/usr/local
+# Parallel build threads
+ENV ESMF_J=8
+
+# 3. Build ESMF from source
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/esmf-org/esmf.git esmf
+WORKDIR /src/esmf
+RUN make -j $ESMF_J && make install

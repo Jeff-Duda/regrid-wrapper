@@ -1,0 +1,16 @@
+name: regrid-wrapper-dev-no-esmpy
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - xarray
+  - mpi4py
+  - numpy
+  - netcdf4
+  - cartopy
+  - pyremap
+  - mypy
+  - black
+  - pytest
+  - pytest-mock

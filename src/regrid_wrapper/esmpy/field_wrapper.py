@@ -23,7 +23,7 @@ def open_nc(
     path: Path,
     mode: Literal["r", "w", "a"] = "r",
     clobber: bool = False,
-    parallel: bool = ENV.REGRID_WRAPPER_PARALLEL_NC4,
+    parallel: bool = True
 ) -> nc.Dataset:
     _LOGGER.debug(f"opening {path}")
     kwds = dict(
@@ -58,18 +58,15 @@ def resize_nc(
     new_sizes: Dict[str, int],
     copy_values_for: Sequence[str] = tuple(),
 ) -> None:
-    if not ENV.REGRID_WRAPPER_PARALLEL_NC4 and COMM.rank != 0:
-        return
-    else:
-        with open_nc(src_path, mode="r") as src:
-            with open_nc(dst_path, mode="w") as dst:
-                copy_nc_attrs(src, dst)
-                for dim in src.dimensions:
-                    size = get_aliased_key(new_sizes, dim)
-                    dst.createDimension(dim, size=size)
-                for varname in src.variables.keys():
-                    copy_data = varname in copy_values_for
-                    copy_nc_variable(src, dst, varname, copy_data=copy_data)
+    with open_nc(src_path, mode="r") as src:
+        with open_nc(dst_path, mode="w") as dst:
+            copy_nc_attrs(src, dst)
+            for dim in src.dimensions:
+                size = get_aliased_key(new_sizes, dim)
+                dst.createDimension(dim, size=size)
+            for varname in src.variables.keys():
+                copy_data = varname in copy_values_for
+                copy_nc_variable(src, dst, varname, copy_data=copy_data)
 
 
 def copy_nc_variable(
@@ -180,7 +177,7 @@ def set_variable_data(
 def set_variable_data_serial(path: Path, varname: str, target_dims: DimensionCollection, target_data: np.ndarray) -> None:
     if COMM.rank > 0:
         COMM.recv(source=COMM.rank - 1, tag=Tag.SET_VARIABLE_DATA)
-    with open_nc(path, mode="a") as ds:
+    with open_nc(path, mode="a", parallel=False) as ds:
         var = ds.variables[varname]
         set_variable_data(var, target_dims, target_data)
     if COMM.rank < COMM.size - 1:
@@ -284,24 +281,14 @@ class GridWrapper(AbstractWrapper):
         if self.corner_dims is not None:
             raise NotImplementedError
         staggerloc = esmpy.StaggerLoc.CENTER
-        if ENV.REGRID_WRAPPER_PARALLEL_NC4:
-            with open_nc(path, "a") as ds:
-                x_center_data = self.spec.get_x_data(self.value, staggerloc)
-                set_variable_data(
-                    ds.variables[self.spec.x_center], self.dims, x_center_data
-                )
-                y_center_data = self.spec.get_y_data(self.value, staggerloc)
-                set_variable_data(
-                    ds.variables[self.spec.y_center], self.dims, y_center_data
-                )
-        else:
+        with open_nc(path, "a") as ds:
             x_center_data = self.spec.get_x_data(self.value, staggerloc)
-            set_variable_data_serial(
-                path, self.spec.x_center, self.dims, x_center_data
+            set_variable_data(
+                ds.variables[self.spec.x_center], self.dims, x_center_data
             )
             y_center_data = self.spec.get_y_data(self.value, staggerloc)
-            set_variable_data_serial(
-                path, self.spec.y_center, self.dims, y_center_data
+            set_variable_data(
+                ds.variables[self.spec.y_center], self.dims, y_center_data
             )
 
 
@@ -374,12 +361,9 @@ class FieldWrapper(AbstractWrapper):
 
     def fill_nc_variable(self, path: Path):
         _LOGGER.debug(r"filling variable: {self.value.name}")
-        if ENV.REGRID_WRAPPER_PARALLEL_NC4:
-            with open_nc(path, "a") as ds:
-                var = ds.variables[self.value.name]
-                set_variable_data(var, self.dims, self.value.data)
-        else:
-            set_variable_data_serial(path, self.value.name, self.dims, self.value.data)
+        with open_nc(path, "a") as ds:
+            var = ds.variables[self.value.name]
+            set_variable_data(var, self.dims, self.value.data)
 
 
 @dataclass

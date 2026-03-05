@@ -1,0 +1,46 @@
+# Use a modern Ubuntu base
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gfortran \
+    wget \
+    git \
+    curl \
+    libtool \
+    m4 \
+    python3-dev \
+    python3-pip \
+    ca-certificates \
+    coreutils \
+    unzip \
+    libopenblas-dev \
+    libopenmpi-dev \
+    libyaml-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+
+# 2. Clone spack-stack
+RUN git clone --recurse-submodules https://github.com/JCSDA/spack-stack
+
+WORKDIR /opt/spack-stack
+
+# 3. Setup spack-stack activation on shell entry
+ENV SPACK_ROOT=/opt/spack-stack/spack
+RUN echo "export SPACK_ROOT=/opt/spack-stack/spack" >> /etc/bash.bashrc \
+    && echo "source /opt/spack-stack/setup.sh" >> /etc/bash.bashrc
+
+# Ensure setup.sh exists and is accessible
+RUN test -f /opt/spack-stack/setup.sh
+
+# Default command
+CMD ["/bin/bash"]

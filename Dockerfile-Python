@@ -1,0 +1,33 @@
+FROM i-esmf:latest
+
+# 4. Build and install mpi4py from source
+# We do this before the uv environment to ensure it links to the system OpenMPI
+RUN pip install --no-binary mpi4py mpi4py
+
+# 5. Build NetCDF4-python (Parallel enabled) from source
+# Requires HDF5_DIR and NETCDF4_DIR (standard Ubuntu paths for OpenMPI versions)
+ENV HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/openmpi
+ENV NETCDF4_DIR=/usr/lib/x86_64-linux-gnu/netcdf/openmpi
+RUN pip install --no-binary netcdf4 netcdf4
+
+# 6. Build and install ESMPy
+WORKDIR /src/esmf/src/addon/ESMPy
+RUN python3 setup.py build --ESMFMKFILE=/usr/local/lib/libg/Linux.gfortran.64.openmpi.default/esmf.mk
+RUN python3 setup.py install
+
+# 7. Create the Python Environment using uv
+WORKDIR /app
+RUN uv init --no-workspace
+RUN uv add \
+    pydantic \
+    xarray \
+    pytest \
+    pytest-mock \
+    # We add these again via uv to ensure they are in the managed environment
+    # but uv will likely use the system-built versions if compatible
+    # or re-compile them within the venv.
+    netcdf4 \
+    mpi4py
+
+# Set the entry point to use the uv environment
+ENTRYPOINT ["uv", "run"]
