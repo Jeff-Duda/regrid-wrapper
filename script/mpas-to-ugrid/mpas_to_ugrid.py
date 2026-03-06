@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 import uxarray as ux
 import logging
@@ -13,7 +14,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mpas_to_ugrid")
 
-def convert_mpas_to_ugrid(input_path: str, output_path: str) -> None:
+def convert_mpas_to_ugrid(input_path: str) -> str:
     """
     Reads an MPAS grid file using uxarray and writes it to a NetCDF file in UGRID format.
     """
@@ -22,9 +23,11 @@ def convert_mpas_to_ugrid(input_path: str, output_path: str) -> None:
     uxgrid = ux.open_grid(input_path)
     logger.info(uxgrid)
 
+    output_path = "tmp_ugrid.nc"
     logger.info(f"Writing UGRID to: {output_path}")
     uxgrid.to_xarray().to_netcdf(output_path)
     logger.info("Conversion completed successfully.")
+    return output_path
 
 
 def fix_conversion(input_path: str, output_path: str) -> None:
@@ -71,5 +74,9 @@ def fix_conversion(input_path: str, output_path: str) -> None:
 if __name__ == "__main__":
     input_path = "/scratch4/BMC/acomp/Sudheer/Fire-nest/Retros/MPAS/BensTest/conus3km/conus3km.20250922/stmp/20250922/rrfs_ic_00_v2.1.2/det/ic_00/init.nc"
     output_path = "/scratch3/NCEPDEV/stmp/Benjamin.Koziol/sandbox/data/mpas-aerosols/ugrid.nc"
-    convert_mpas_to_ugrid(input_path, output_path)
-    fix_conversion(input_path, output_path)
+
+    tmp_ugrid_path = convert_mpas_to_ugrid(input_path)
+    try:
+        fix_conversion(tmp_ugrid_path, output_path)
+    finally:
+        Path(tmp_ugrid_path).unlink()
