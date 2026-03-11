@@ -10,7 +10,9 @@ dependencies:
   - numpy=1.23.*
   - netcdf4=1.6.*=mpi_mpich*
   - cartopy
-  - pyremap
+#  - pyremap
+  - uxarray
+  - nco
   - mypy
   - black
   - pytest

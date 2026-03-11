@@ -92,70 +92,70 @@ def create_rrfs_grid_file(
     return ds
 
 
-def create_veg_map_file(path: Path, field_names: List[str]) -> xr.Dataset:
-    if path.exists():
-        raise ValueError(f"path exists: {path}")
-    lon = np.linspace(230, 300, 71)
-    lat = np.linspace(25, 50, 26)
-    lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-
-    with nc.Dataset(path, "w") as ds:
-        ds.createDimension("lon", 71)
-        ds.createDimension("geolon", 71)
-        ds.createDimension("lat", 26)
-        ds.createDimension("geolat", 26)
-        geolat = ds.createVariable("geolat", float, ("lat", "lon"))
-        geolat[:] = lat_mesh
-        geolon = ds.createVariable("geolon", float, ("lat", "lon"))
-        geolon[:] = lon_mesh
-        for field_name in field_names:
-            field = ds.createVariable(field_name, float, ("geolat", "geolon"))
-            field[:] = create_analytic_data_array(
-                ("geolat", "geolon"), lon_mesh, lat_mesh
-            )
-            field.setncattr("foo", random.random())
-
-    # ds = xr.Dataset()
-    # dims = ["geolat", "geolon"]
-    # ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
-    # ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
-    # for field_name in field_names:
-    #     ds[field_name] = create_analytic_data_array(dims, lon_mesh, lat_mesh)
-    #     ds[field_name].attrs["foo"] = random.random()
-    # ds.to_netcdf(path)
-
-    return ds
-
-
-DUST_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in ("foo", "bar")}
+# def create_veg_map_file(path: Path, field_names: List[str]) -> xr.Dataset:
+#     if path.exists():
+#         raise ValueError(f"path exists: {path}")
+#     lon = np.linspace(230, 300, 71)
+#     lat = np.linspace(25, 50, 26)
+#     lon_mesh, lat_mesh = np.meshgrid(lon, lat)
+#
+#     with nc.Dataset(path, "w") as ds:
+#         ds.createDimension("lon", 71)
+#         ds.createDimension("geolon", 71)
+#         ds.createDimension("lat", 26)
+#         ds.createDimension("geolat", 26)
+#         geolat = ds.createVariable("geolat", float, ("lat", "lon"))
+#         geolat[:] = lat_mesh
+#         geolon = ds.createVariable("geolon", float, ("lat", "lon"))
+#         geolon[:] = lon_mesh
+#         for field_name in field_names:
+#             field = ds.createVariable(field_name, float, ("geolat", "geolon"))
+#             field[:] = create_analytic_data_array(
+#                 ("geolat", "geolon"), lon_mesh, lat_mesh
+#             )
+#             field.setncattr("foo", random.random())
+#
+#     # ds = xr.Dataset()
+#     # dims = ["geolat", "geolon"]
+#     # ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
+#     # ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
+#     # for field_name in field_names:
+#     #     ds[field_name] = create_analytic_data_array(dims, lon_mesh, lat_mesh)
+#     #     ds[field_name].attrs["foo"] = random.random()
+#     # ds.to_netcdf(path)
+#
+#     return ds
 
 
-def create_dust_data_file(path: Path) -> xr.Dataset:
-    if path.exists():
-        raise ValueError(f"path exists: {path}")
-
-    lon = np.linspace(230, 300, 71)
-    lat = np.linspace(25, 50, 26)
-    lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-    ds = xr.Dataset()
-    dims = ["lat", "lon"]
-    ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
-    ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
-
-    ds["time"] = xr.DataArray(np.arange(12, dtype=np.double), dims=["time"])
-
-    for coord_name in ["time", "geolat", "geolon"]:
-        ds[coord_name].attrs["foo"] = random.random()
-
-    for field_name in ("foo", "bar"):
-        ds[field_name] = create_analytic_data_array(
-            ["time", "lat", "lon"], lon_mesh, lat_mesh, ntime=12
-        )
-        ds[field_name] += DUST_FIELD_OFFSETS[field_name]
-        ds[field_name].attrs["foo"] = random.random()
-    ds.attrs["foo"] = random.random()
-    ds.to_netcdf(path)
-    return ds
+# DUST_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in ("foo", "bar")}
+#
+#
+# def create_dust_data_file(path: Path) -> xr.Dataset:
+#     if path.exists():
+#         raise ValueError(f"path exists: {path}")
+#
+#     lon = np.linspace(230, 300, 71)
+#     lat = np.linspace(25, 50, 26)
+#     lon_mesh, lat_mesh = np.meshgrid(lon, lat)
+#     ds = xr.Dataset()
+#     dims = ["lat", "lon"]
+#     ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
+#     ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
+#
+#     ds["time"] = xr.DataArray(np.arange(12, dtype=np.double), dims=["time"])
+#
+#     for coord_name in ["time", "geolat", "geolon"]:
+#         ds[coord_name].attrs["foo"] = random.random()
+#
+#     for field_name in ("foo", "bar"):
+#         ds[field_name] = create_analytic_data_array(
+#             ["time", "lat", "lon"], lon_mesh, lat_mesh, ntime=12
+#         )
+#         ds[field_name] += DUST_FIELD_OFFSETS[field_name]
+#         ds[field_name].attrs["foo"] = random.random()
+#     ds.attrs["foo"] = random.random()
+#     ds.to_netcdf(path)
+#     return ds
 
 
 def assert_zero_sum_diff(actual: np.ndarray, expected: np.ndarray) -> None:

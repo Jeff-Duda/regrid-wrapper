@@ -1,4 +1,5 @@
 import abc
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,7 @@ import netCDF4 as nc
 
 from mpi4py import MPI
 
-from regrid_wrapper.context.comm import COMM, Tag
+from regrid_wrapper.context.comm import COMM, Tag, reconcile_bounds
 from regrid_wrapper.context.env import ENV
 from regrid_wrapper.context.logging import LOGGER
 
@@ -109,7 +110,7 @@ class Dimension:
     lower: int
     upper: int
     staggerloc: int
-    coordinate_type: Literal["y", "x", "time", "cell", "level"]
+    coordinate_type: Literal["y", "x", "time", "element", "level"]
 
 
 @dataclass
@@ -291,6 +292,48 @@ class GridWrapper(AbstractWrapper):
                 ds.variables[self.spec.y_center], self.dims, y_center_data
             )
 
+@dataclass
+class MeshWrapper(AbstractWrapper):
+    value: esmpy.Mesh
+
+
+@dataclass
+class NcToMesh:
+    path: Path
+    filetype: int = esmpy.FileFormat.UGRID
+    meshname: str = "grid_topology"
+
+    def create_mesh_wrapper(self) -> MeshWrapper:
+        t1 = time.perf_counter()
+        mesh = esmpy.Mesh(
+            filename=str(self.path), filetype=self.filetype, meshname=self.meshname,
+        )
+        t2 = time.perf_counter()
+        LOGGER.debug(f"mesh read time: {t2 - t1} s, {COMM.size=}")
+        local_bounds = reconcile_bounds((0, mesh.size_owned[1]))
+        LOGGER.debug(f"{local_bounds=}")
+
+        with open_nc(self.path, "r") as ds:
+            host = ds.variables[self.meshname]
+            n_faces = ds.dimensions[host.face_dimension].size
+            dim = Dimension(
+                name=host.face_dimension,
+                size=n_faces,
+                lower=local_bounds[0],
+                upper=local_bounds[1],
+                staggerloc=esmpy.MeshLoc.ELEMENT,
+                coordinate_type="element",
+            )
+            dims = DimensionCollection(value=(dim,))
+
+        mwrap = MeshWrapper(value=mesh, dims=dims)
+        return mwrap
+
+    def __post_init__(self) -> None:
+        if not self.path.exists():
+            raise FileNotFoundError(self.path)
+
+
 
 @dataclass
 class NcToGrid:
@@ -420,12 +463,22 @@ class NcToField:
                         len(get_nc_dimension(ds, self.dim_level)),
                         len(get_nc_dimension(ds, self.dim_time)),
                     )
-            field = esmpy.Field(
-                self.gwrap.value,
-                name=self.name,
-                ndbounds=ndbounds,
-                staggerloc=self.staggerloc,
-            )
+            if isinstance(self.gwrap, GridWrapper):
+                field = esmpy.Field(
+                    self.gwrap.value,
+                    name=self.name,
+                    ndbounds=ndbounds,
+                    staggerloc=self.staggerloc,
+                )
+            elif isinstance(self.gwrap, MeshWrapper):
+                field = esmpy.Field(
+                    self.gwrap.value,
+                    name=self.name,
+                    ndbounds=ndbounds,
+                    meshloc=self.staggerloc,
+                )
+            else:
+                raise NotImplementedError(type(self.gwrap))
             field.data[:] = load_variable_data(ds.variables[self.name], target_dims)
             fwrap = FieldWrapper(value=field, dims=target_dims, gwrap=self.gwrap)
             return fwrap

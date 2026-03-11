@@ -6,3 +6,7 @@
 /outputs/
 __pycache__/
 /data/
+
+.output.txt
+
+*.DS_Store

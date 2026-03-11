@@ -41,6 +41,6 @@ ENV ESMF_J=8
 
 # 3. Build ESMF from source
 WORKDIR /src
-RUN git clone --depth 1 https://github.com/esmf-org/esmf.git esmf
+RUN git clone --branch 8.9.1 --depth 1 https://github.com/esmf-org/esmf.git esmf
 WORKDIR /src/esmf
 RUN make -j $ESMF_J && make install
