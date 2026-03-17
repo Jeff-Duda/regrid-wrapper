@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 
 from regrid_wrapper.context.comm import COMM, reconcile_bounds
-from regrid_wrapper.context.env import ENV
 from regrid_wrapper.context.logging import LOGGER
 from regrid_wrapper.esmpy.field_wrapper import (
     GridSpec,
@@ -27,7 +26,7 @@ from regrid_wrapper.esmpy.field_wrapper import (
     DimensionCollection,
     set_variable_data,
     HasNcAttrsType,
-    copy_nc_variable, set_variable_data_serial,
+    copy_nc_variable,
 )
 
 _LOGGER = LOGGER.getChild("mpas-regrid")
@@ -275,6 +274,7 @@ class FileDesc:
 
 
 class RaveToMpasRegridProcessor:
+    _dst_mesh: esmpy.Mesh | None = None
 
     def __init__(self, context: RaveToMpasRegridContext) -> None:
         self.context = context
@@ -282,20 +282,19 @@ class RaveToMpasRegridProcessor:
         self._regridder: esmpy.Regrid | None = None
         self._dst_field: esmpy.Field | None = None
         self._src_gwrap: GridWrapper | None = None
-        self._dst_mesh: esmpy.Mesh | None = None
 
     def initialize(self) -> None:
         _LOGGER.info(f"initialize: {self.context=}")
         esmpy.Manager(debug=True)
 
-        if not self.context.scrip_path.exists() and self.context.rank == 0:
-            _LOGGER.info("writing mpas scrip grid")
-            from pyremap import MpasCellMeshDescriptor
-
-            mpas_desc = MpasCellMeshDescriptor(
-                str(self.context.dst_path), self.context.mesh_name + ".init"
-            )
-            mpas_desc.to_scrip(str(self.context.scrip_path))
+        # if not self.context.scrip_path.exists() and self.context.rank == 0:
+        #     _LOGGER.info("writing mpas scrip grid")
+        #     from pyremap import MpasCellMeshDescriptor
+        #
+        #     mpas_desc = MpasCellMeshDescriptor(
+        #         str(self.context.dst_path), self.context.mesh_name + ".init"
+        #     )
+        #     mpas_desc.to_scrip(str(self.context.scrip_path))
 
         print("create source grid")
         if self.context.x_corner_dim is None:
@@ -330,11 +329,15 @@ class RaveToMpasRegridProcessor:
         _LOGGER.info("create source field")
         src_fwrap = self.create_src_field_wrapper(self.context.rave_fields[0].name)
 
-        _LOGGER.info("create destination mesh")
-        dst_mesh = esmpy.Mesh(
-            filename=str(self.context.scrip_path), filetype=esmpy.FileFormat.SCRIP
-        )
-        self._dst_mesh = dst_mesh
+        if self._dst_mesh is None:
+            _LOGGER.info("create destination mesh")
+            # dst_mesh = esmpy.Mesh(
+            #     filename=str(self.context.scrip_path), filetype=esmpy.FileFormat.SCRIP
+            # )
+            self._dst_mesh = esmpy.Mesh(
+                filename=str(self.context.scrip_path), filetype=esmpy.FileFormat.UGRID, meshname="grid_topology"
+            )
+        dst_mesh = self._dst_mesh
 
 # Check for extra dims beyond lat/lon
         if self.context.level_out_size > 1 and self.context.time_size > 1:
@@ -451,169 +454,135 @@ class RaveToMpasRegridProcessor:
             dims = rave_field.create_dimension_collection(reconciled_bounds)
             _LOGGER.info(f"{dims=}")
             _LOGGER.info(f"writing field to netcdf")
-            with open_nc(self.context.new_dst_path, mode="r") as ds:
+            with open_nc(self.context.new_dst_path, mode="a") as ds:
                 if self.context.dataset_name == "RAVE" and rave_field.name in ("FRP_MEAN", "FRE"):
                     area = np.asarray(ds.variables['areaCell'])
                     area_subset = area[reconciled_bounds[0]:reconciled_bounds[1]]
-            if COMM.rank == 0:
-                with open_nc(self.context.new_dst_path, mode="a", parallel=False) as ds:
-                    var = ds.createVariable(
-                        rave_field.name,
-                        rave_field.dtype,
-                        [dim.name[0] for dim in dims.value],
-                        fill_value=rave_field.fill_value,
-                    )
-                    for k, v in rave_field.attrs.items():
-                        setattr(var, k, v)
-            COMM.barrier()
+                _LOGGER.info(f"creating variable {rave_field.name=}")
+                var = ds.createVariable(
+                    rave_field.name,
+                    rave_field.dtype,
+                    [dim.name[0] for dim in dims.value],
+                    fill_value=rave_field.fill_value,
+                )
+                for k, v in rave_field.attrs.items():
+                    setattr(var, k, v)
 
-            if self.context.dataset_name == "RAVE" and rave_field.name in ("FRP_MEAN", "FRE"):
+                _LOGGER.info(f"setting variable data {rave_field.name=}")
                 # Multiply FRE/FRP by output area so it is back to W or J*s
-                target_data = rave_field.reshape_field_data(dst_field.data * area_subset)
-            else:
-                target_data = rave_field.reshape_field_data(dst_field.data)
-            if ENV.REGRID_WRAPPER_PARALLEL_NC4:
-                with open_nc(self.context.new_dst_path, mode="a") as ds:
-                    var = ds.variables[rave_field.name]
+                if self.context.dataset_name == "RAVE" and rave_field.name in ("FRP_MEAN", "FRE"):
                     set_variable_data(
                         var,
                         dims,
-                        target_data,
+                        rave_field.reshape_field_data(dst_field.data * area_subset),
                         collective=True,
                     )
-            else:
-                set_variable_data_serial(
-                    self.context.new_dst_path,
-                    rave_field.name,
-                    dims,
-                    target_data,
-                )
+                else:
+                    set_variable_data(
+                        var,
+                        dims,
+                        rave_field.reshape_field_data(dst_field.data),
+                        collective=True,
+                    )
+            _LOGGER.info(f"finished writing field to netcdf {rave_field.name=}")
             src_fwrap.value.destroy()
             del src_fwrap
 
             if rave_field.name == "ENL_POLL":
-                _LOGGER.info(f"renaming and combining tree fields")
+                with open_nc(self.context.new_dst_path, mode="a") as ds:
+                    _LOGGER.info(f"renaming and combining tree fields")
 
-                src_fwrap_enl = self.create_src_field_wrapper(field_name='ENL_POLL')
-                dst_field_enl = self.get_dst_field()
-                dst_field_enl.data.fill(0.0)
-                regridder(src_fwrap_enl.value, dst_field_enl)
+                    src_fwrap_enl = self.create_src_field_wrapper(field_name='ENL_POLL')
+                    dst_field_enl = self.get_dst_field()
+                    dst_field_enl.data.fill(0.0)
+                    regridder(src_fwrap_enl.value, dst_field_enl)
 
-                src_fwrap_dbl = self.create_src_field_wrapper(field_name='DBL_POLL')
-                dst_field_dbl = self.get_dst_field()
-                dst_field_dbl.data.fill(0.0)
-                regridder(src_fwrap_dbl.value, dst_field_dbl)
+                    src_fwrap_dbl = self.create_src_field_wrapper(field_name='DBL_POLL')
+                    dst_field_dbl = self.get_dst_field()
+                    dst_field_dbl.data.fill(0.0)
+                    regridder(src_fwrap_dbl.value, dst_field_dbl)
 
-                rave_field = self.context.rave_fields[0]
+                    rave_field = self.context.rave_fields[0]
 
-                if COMM.rank == 0:
-                    with open_nc(self.context.new_dst_path, mode="a", parallel=False) as ds:
-                        var = ds.createVariable(
-                            'TREE_POLL',
-                            rave_field.dtype,
-                            [dim.name[0] for dim in dims.value],
-                            fill_value=rave_field.fill_value,
-                        )
-                        for k, v in self.context.rave_fields[0].attrs.items():
-                            setattr(var, k, v)
-                COMM.barrier()
-
-                target_data = rave_field.reshape_field_data(dst_field_enl.data + dst_field_dbl.data)
-                if ENV.REGRID_WRAPPER_PARALLEL_NC4:
-                    with open_nc(self.context.new_dst_path, mode="a") as ds:
-                        var = ds.variables['TREE_POLL']
-                        set_variable_data(
-                            var,
-                            dims,
-                            target_data,
-                            collective=True,
-                        )
-                else:
-                    set_variable_data_serial(
-                        self.context.new_dst_path,
+                    var = ds.createVariable(
                         'TREE_POLL',
-                        dims,
-                        target_data,
+                        rave_field.dtype,
+                        [dim.name[0] for dim in dims.value],
+                        fill_value=rave_field.fill_value,
                     )
-
+                    for k, v in self.context.rave_fields[0].attrs.items():
+                        setattr(var, k, v)
+                    set_variable_data(
+                        var,
+                        dims,
+                        rave_field.reshape_field_data(dst_field_enl.data + dst_field_dbl.data),
+                        collective=True,
+                    )
                 src_fwrap_enl.value.destroy()
                 del src_fwrap_enl
                 src_fwrap_dbl.value.destroy()
                 del src_fwrap_dbl
             if rave_field.name == "TPM":
-                _LOGGER.info(f"calculating PM10 as TPM - PM25")
-                src_fwrap_ttl = self.create_src_field_wrapper(field_name='TPM')
-                src_fwrap_p25 = self.create_src_field_wrapper(field_name='PM25')
+                with open_nc(self.context.new_dst_path, mode="a") as ds:
+                    _LOGGER.info(f"calculating PM10 as TPM - PM25")
+                    src_fwrap_ttl = self.create_src_field_wrapper(field_name='TPM')
+                    src_fwrap_p25 = self.create_src_field_wrapper(field_name='PM25')
 
-                dst_field_ttl = self.get_dst_field()
-                dst_field_ttl.data.fill(0.0)
-                regridder(src_fwrap_ttl.value, dst_field_ttl)
+                    dst_field_ttl = self.get_dst_field()
+                    dst_field_ttl.data.fill(0.0)
+                    regridder(src_fwrap_ttl.value, dst_field_ttl)
 
-                dst_field_p25 = self.get_dst_field()
-                dst_field_p25.data.fill(0.0)
-                regridder(src_fwrap_p25.value, dst_field_p25)
+                    dst_field_p25 = self.get_dst_field()
+                    dst_field_p25.data.fill(0.0)
+                    regridder(src_fwrap_p25.value, dst_field_p25)
 
-                rave_field = self.context.rave_fields[0]
+                    rave_field = self.context.rave_fields[0]
 
-                if self.context.rank == 0:
-                    with open_nc(self.context.new_dst_path, mode="a", parallel=False) as ds:
-                        var = ds.createVariable(
-                            'PM10',
-                            rave_field.dtype,
-                            [dim.name[0] for dim in dims.value],
-                            fill_value=rave_field.fill_value,
-                        )
-                        for k, v in self.context.rave_fields[0].attrs.items():
-                            setattr(var, k, v)
-                COMM.barrier()
-
-                data1 = rave_field.reshape_field_data(dst_field_ttl.data)
-                data2 = rave_field.reshape_field_data(dst_field_p25.data)
-                data3 = data1 - data2
-                if ENV.REGRID_WRAPPER_PARALLEL_NC4:
-                    with open_nc(self.context.new_dst_path, mode="a") as ds:
-                        var = ds.variables['PM10']
-                        set_variable_data(
-                            var,
-                            dims,
-                            data3,
-                            collective=True,
-                        )
-                else:
-                    set_variable_data_serial(
-                        self.context.new_dst_path,
+                    var = ds.createVariable(
                         'PM10',
+                        rave_field.dtype,
+                        [dim.name[0] for dim in dims.value],
+                        fill_value=rave_field.fill_value,
+                    )
+                    for k, v in self.context.rave_fields[0].attrs.items():
+                        setattr(var, k, v)
+                    data1 = rave_field.reshape_field_data(dst_field_ttl.data)
+                    data2 = rave_field.reshape_field_data(dst_field_p25.data)
+                    data3 = data1 - data2
+                    set_variable_data(
+                        var,
                         dims,
                         data3,
+                        collective=True,
                     )
                 src_fwrap_ttl.value.destroy()
                 del src_fwrap_ttl
                 src_fwrap_p25.value.destroy()
                 del src_fwrap_p25
 
-        if self.context.rank == 0:
-            field_names = tuple(ii.name for ii in self.context.rave_fields)
-            targets = [
-                FileDesc(
-                    path=self.context.new_dst_path,
-                    origin="dst",
-                    field_names=field_names,
-                ),
-                FileDesc(
-                    path=self.context.src_path,
-                    origin="src",
-                    field_names=field_names,
-                ),
-            ]
-            data_frame = self.create_desc_stuff(targets)
-            data_frame.to_csv(self.context.desc_stats_out, index=False)
+        # if self.context.rank == 0:
+        #     field_names = tuple(ii.name for ii in self.context.rave_fields)
+        #     targets = [
+        #         FileDesc(
+        #             path=self.context.new_dst_path,
+        #             origin="dst",
+        #             field_names=field_names,
+        #         ),
+        #         FileDesc(
+        #             path=self.context.src_path,
+        #             origin="src",
+        #             field_names=field_names,
+        #         ),
+        #     ]
+        #     data_frame = self.create_desc_stuff(targets)
+        #     data_frame.to_csv(self.context.desc_stats_out, index=False)
 
     def finalize(self) -> None:
         _LOGGER.info("finalizing")
         self._regridder.destroy()
         self._dst_field.destroy()
         self._src_gwrap.value.destroy()
-        self._dst_mesh.destroy()
+        # self._dst_mesh.destroy()
 
     def create_desc_stuff(self, targets: Iterable[FileDesc]) -> pd.DataFrame:
         _LOGGER.info("entering create_desc_stuff")
@@ -756,8 +725,10 @@ def main() -> None:
     weight_dir = sys.argv[5]  # Directory that contains the regrid weights
     cycle = sys.argv[6]  # Cycle Time, YYYYMMDDHH
     mesh_name = sys.argv[7]  # Name of the domain
+    scrip_path = Path(sys.argv[8])  # Path to the input SCRIP/UGRID domain grid file
+    dst_path = Path(sys.argv[9])   # Path to the destination grid (e.g., init.nc)
 
-    ebb_dcycle = os.getenv('EBB_DCYCLE')
+    ebb_dcycle = int(os.getenv('EBB_DCYCLE'))
     #
     # Test to see if scrip files exist
     # testpath = Path(weight_dir + "/scrip_files/mpas_" + mesh_name + "_scrip.nc")
@@ -766,9 +737,9 @@ def main() -> None:
     #    scrip_path = testpath
     # else:
     # FOR NOW, ALWAYS CREATE SCRIP
-    scrip_path = Path(workdir + "/mpas_" + dataset_name + "-" + mesh_name + "_scrip.nc")
+    # scrip_path = Path(workdir + "/mpas_" + dataset_name + "-" + mesh_name + "_scrip.nc")
     #
-    dst_path = Path(workdir + "/init.nc")
+    # dst_path = Path(workdir + "/init.nc")
     desc_stats_out = Path(workdir + "/desc_stats-" + cycle + ".csv")
     #
     YYYY = cycle[0:4]
@@ -786,13 +757,13 @@ def main() -> None:
         DOWs = "sundy"
 
     # Calculate the number of cells in the
+    # num_cells = 5055722
     with open_nc(dst_path, mode="r", parallel=False) as src_nc:
         foo = src_nc.variables['latCell']
         num_cells = len(foo)
         # xland = src_nc.variables['xland']
         # lmask[:] = np.where(xland > 0,1,0)
 
-    processor = None
     if dataset_name == "RAVE":
         field_names = ("TPM", "FRE", "FRP_MEAN", "PM25", "NH3", "SO2", "CH4","CO","NOx")
         # JLS, TODO - NEED TO ACCOUNT FOR EBB1, MORE THAN 24, ETC.
@@ -965,17 +936,19 @@ def main() -> None:
     weight_path = Path(weight_dir + "/weights_" + dataset_name + "-to-" + "mpas_" + mesh_name + "_" + InterpMethod + ".nc")
 
     if dataset_name == "RAVE":
+        processor = None
         for date_to_process in dates_needed:
+            _LOGGER.info(f"RAVE processing {date_to_process=}")
             rave_paths = find_latest_rave_file(input_dir, date_to_process, ebb_dcycle, max_lookback_hours=24)
             #rave_paths = glob.glob(input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s" + date_to_process + "*")
             #if len(rave_paths) == 0:
             #    print("No matching files found for " + input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s" + date_to_process + "*")
             #    continue
             if not rave_paths:
-                print(f"No matching files found for {date_to_process} (even after lookback).")
+                _LOGGER.warn(f"No matching files found for {date_to_process} (even after lookback).")
                 continue
 
-            print('Reading RAVE file:', rave_paths)
+            _LOGGER.info(f'Reading RAVE file: {rave_paths=}')
             rave_path = rave_paths[0]
             new_dst_path = Path(output_dir + "/" + mesh_name + "-RAVE-" + date_to_process + ".nc")
             # --- OPTIMIZATION START ---
@@ -1023,8 +996,8 @@ def main() -> None:
             processor.run()
             # --- OPTIMIZATION END ---
                     # Only finalize after ALL files are done
-            if processor:
-                processor.finalize()
+        if processor:
+            processor.finalize()
 
             _LOGGER.info("success")
 

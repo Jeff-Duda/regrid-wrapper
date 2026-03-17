@@ -160,7 +160,11 @@ def set_variable_data(
     if collective:
         var.set_collective(True)
     dim_map = create_dimension_map(target_dims)
-    axes = [get_aliased_key(dim_map, ii) for ii in var.dimensions]
+    try:
+        axes = [get_aliased_key(dim_map, ii) for ii in var.dimensions]
+    except:
+        _LOGGER.debug(f"{dim_map=}; {var.dimensions=}")
+        raise
     transposed_data = target_data.transpose(axes)
     slices = [
         slice(target_dims.get(ii).lower, target_dims.get(ii).upper)
@@ -317,7 +321,7 @@ class NcToMesh:
             host = ds.variables[self.meshname]
             n_faces = ds.dimensions[host.face_dimension].size
             dim = Dimension(
-                name=host.face_dimension,
+                name=(host.face_dimension,),
                 size=n_faces,
                 lower=local_bounds[0],
                 upper=local_bounds[1],
@@ -410,6 +414,36 @@ class FieldWrapper(AbstractWrapper):
 
 
 @dataclass
+class MetaToField:
+    name: str
+    gwrap: GridWrapper
+    staggerloc: int = esmpy.StaggerLoc.CENTER
+    dim_time: Dimension | None = None
+    dim_level: Dimension | None = None
+
+    def create_field_wrapper(self) -> FieldWrapper:
+        if self.dim_time is None and self.dim_level is not None:
+            raise ValueError("dim_time must be given if dim_level is given")
+        ndbounds = None
+        dims = list(self.gwrap.dims.value)
+        ndbounds_dims = []
+        if self.dim_time is not None:
+            ndbounds_dims = [self.dim_time]
+            ndbounds = [self.dim_time.size]
+            if self.dim_level is not None:
+                ndbounds_dims = [self.dim_level, self.dim_time]
+                ndbounds.append(self.dim_level.size)
+        field = esmpy.Field(
+            self.gwrap.value,
+            name=self.name,
+            ndbounds=ndbounds,
+            staggerloc=self.staggerloc,
+        )
+        target_dims = DimensionCollection(value=dims + ndbounds_dims)
+        return FieldWrapper(value=field, dims=target_dims, gwrap=self.gwrap)
+
+
+@dataclass
 class NcToField:
     path: Path
     name: str
@@ -417,6 +451,7 @@ class NcToField:
     dim_time: NameListType | None = None
     dim_level: NameListType | None = None
     staggerloc: int = esmpy.StaggerLoc.CENTER
+    load_field_data_from_file: bool = True
 
     def create_field_wrapper(self) -> FieldWrapper:
         with open_nc(self.path, "r") as ds:
@@ -479,7 +514,8 @@ class NcToField:
                 )
             else:
                 raise NotImplementedError(type(self.gwrap))
-            field.data[:] = load_variable_data(ds.variables[self.name], target_dims)
+            if self.load_field_data_from_file:
+                field.data[:] = load_variable_data(ds.variables[self.name], target_dims)
             fwrap = FieldWrapper(value=field, dims=target_dims, gwrap=self.gwrap)
             return fwrap
 

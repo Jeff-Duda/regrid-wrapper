@@ -7,9 +7,8 @@ dependencies:
   - xarray
   - mpi4py
   - numpy
-  - netcdf4
-  - cartopy
-  - pyremap
+  - netcdf4=*=mpi_mpich*
+  - uxarray
   - mypy
   - black
   - pytest

@@ -1,16 +1,24 @@
 import logging
 import os
 from dataclasses import dataclass
+from enum import unique, StrEnum
 
 from pathlib import Path
 from mpi4py import MPI
 
+@unique
+class Platform(StrEnum):
+    URSA = "ursa"
+    GAEAC6 = "gaeac6"
+
 
 @dataclass
 class Environment:
-    REGRID_WRAPPER_LOG_DIR: Path
+    REGRID_WRAPPER_LOG_DIR: Path = Path(".")
     REGRID_WRAPPER_LOG_PREFIX: str = "Regrid-Wrapper"
-    REGRID_WRAPPER_LOG_LEVEL: int = logging.DEBUG
+    REGRID_WRAPPER_LOG_LEVEL: int = logging.INFO
+    REGRID_WRAPPER_PLATFORM: Platform = Platform.URSA
+    REGRID_WRAPPER_TEST_TMPDIR: Path | None = None
 
     def create_log_file_path(self) -> Path:
         comm = MPI.COMM_WORLD
@@ -19,11 +27,19 @@ class Environment:
             / f"{self.REGRID_WRAPPER_LOG_PREFIX}-{str(comm.Get_rank()).zfill(4)}.log"
         )
 
+    def __post_init__(self) -> None:
+        platform = os.environ.get("REGRID_WRAPPER_PLATFORM", "URSA")
+        self.REGRID_WRAPPER_PLATFORM = Platform(platform.lower())
 
-def _get_log_dir_path() -> Path:
-    key = "REGRID_WRAPPER_LOG_DIR"
-    log_dir = os.environ.get(key, Path(".").resolve())
-    return Path(log_dir)
+        key = "REGRID_WRAPPER_LOG_DIR"
+        log_dir = os.environ.get(key, Path(".").resolve())
+        self.REGRID_WRAPPER_LOG_DIR = Path(log_dir)
+
+        test_tmpdir = os.environ.get("REGRID_WRAPPER_TEST_TMPDIR", None)
+        if test_tmpdir is not None:
+            self.REGRID_WRAPPER_TEST_TMPDIR = Path(test_tmpdir)
+            assert self.REGRID_WRAPPER_TEST_TMPDIR.exists()
+            assert self.REGRID_WRAPPER_TEST_TMPDIR.is_dir()
 
 
-ENV = Environment(REGRID_WRAPPER_LOG_DIR=_get_log_dir_path())  # type: ignore[call-arg]
+ENV = Environment()

@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
 markers = [
-    "mpi: these tests are mpi-enabled"
+    "mpi: these tests are mpi-enabled",
+    "integration: these tests require large data files"
 ]
 addopts ="-m 'not mpi'"
 

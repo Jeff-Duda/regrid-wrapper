@@ -1,3 +1,7 @@
+import shutil
+import sys
+print(f"{sys.path=}")
+
 import random
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,7 +26,16 @@ def bin_dir() -> Path:
 
 @pytest.fixture
 def tmp_path_shared(tmp_path: Path) -> Path:
-    return Path(COMM.bcast({"path": str(tmp_path)}, root=0)["path"])
+    if ENV.REGRID_WRAPPER_TEST_TMPDIR is None:
+        tmp_target = tmp_path
+    else:
+        tmp_target = ENV.REGRID_WRAPPER_TEST_TMPDIR / tmp_path.name
+        if COMM.rank == 0:
+            if tmp_target.exists():
+                shutil.rmtree(tmp_target)
+            tmp_target.mkdir(exist_ok=False, parents=False)
+    return Path(COMM.bcast({"path": str(tmp_target)}, root=0)["path"])
+
 
 
 @contextmanager
@@ -160,3 +173,10 @@ def create_rrfs_grid_file(
 
 def assert_zero_sum_diff(actual: np.ndarray, expected: np.ndarray) -> None:
     assert (actual - expected).sum() == 0
+
+
+@pytest.fixture
+def ugrid_path(bin_dir: Path) -> Path:
+    ret = Path(bin_dir) / "mesh.QU.1920km.151026.ugrid.nc"
+    assert ret.exists()
+    return ret

@@ -5,15 +5,8 @@ import pytest
 
 from regrid_wrapper.context.comm import COMM
 from regrid_wrapper.esmpy.field_wrapper import MeshWrapper, NcToField, GridSpec, NcToGrid, open_nc, \
-    NcToMesh
-from test.conftest import create_rrfs_grid_file
-
-
-@pytest.fixture
-def ugrid_path(bin_dir: Path) -> Path:
-    ret = Path(bin_dir) / "mesh.QU.1920km.151026.ugrid.nc"
-    assert ret.exists()
-    return ret
+    NcToMesh, MetaToField, Dimension
+from test.conftest import create_rrfs_grid_file, TEST_LOGGER
 
 
 @pytest.fixture
@@ -34,9 +27,12 @@ def mesh_nc2field(ugrid_path: Path, mwrap: MeshWrapper) -> NcToField:
 
 @pytest.fixture
 def grid_nc2field(tmp_path_shared: Path) -> NcToField:
+    TEST_LOGGER.info("grid_nc2field: enter")
     src_path = tmp_path_shared / "grid.nc"
+    TEST_LOGGER.info(f"{src_path=}")
 
     if COMM.rank == 0:
+        TEST_LOGGER.info(f"grid_nc2field: create RRFS grid file")
         _ = create_rrfs_grid_file(src_path, fields=["foo"])
     COMM.barrier()
 
@@ -53,15 +49,18 @@ def grid_nc2field(tmp_path_shared: Path) -> NcToField:
             y_corner_dim=("grid_y",),
         ),
     )
+    TEST_LOGGER.info(f"grid_nc2field: before create grid wrapper")
     gwrap = nc2grid.create_grid_wrapper()
+    TEST_LOGGER.info(f"grid_nc2field: after create grid wrapper")
 
     nc2field = NcToField(path=src_path, name="foo", gwrap=gwrap)
+    TEST_LOGGER.info("grid_nc2field: exit")
     return nc2field
 
 
 @pytest.mark.mpi
 def test_grid_to_mesh_regridding(mesh_nc2field: NcToField, grid_nc2field: NcToField, tmp_path_shared: Path) -> None:
-
+    TEST_LOGGER.info("test_grid_to_mesh_regridding")
     src_fwrap = grid_nc2field.create_field_wrapper()
 
     dst_field = mesh_nc2field.create_field_wrapper()
@@ -90,3 +89,14 @@ class TestNcToField:
     def test_create_field_wrapper(self, mesh_nc2field: NcToField) -> None:
         fwrap = mesh_nc2field.create_field_wrapper()
         assert isinstance(fwrap.value, esmpy.Field)
+
+
+class TestMetaToField:
+    @pytest.mark.mpi
+    def test_create_field_wrapper(self, grid_nc2field: NcToField) -> None:
+        dim_time = Dimension(name=("time",), size=24, lower=0, upper=23,
+                             staggerloc=esmpy.StaggerLoc.CENTER,
+                             coordinate_type="time")
+        meta2field = MetaToField(name="foo", gwrap=grid_nc2field.gwrap, dim_time=dim_time)
+        fwrap = meta2field.create_field_wrapper()
+        assert fwrap.value.data.shape[2] == 24

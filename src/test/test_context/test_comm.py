@@ -6,6 +6,11 @@ from test.conftest import TEST_LOGGER
 
 
 @pytest.mark.mpi
+def test_size() -> None:
+    assert COMM.size == 8
+
+
+@pytest.mark.mpi
 def test_reconcile_bounds() -> None:
     total_elements = COMM.size * 10 + 5
     if COMM.rank <= 4:
