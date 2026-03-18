@@ -1,3 +1,4 @@
+import shutil
 import sys
 import glob
 from abc import abstractmethod, ABC
@@ -31,6 +32,10 @@ from regrid_wrapper.esmpy.field_wrapper import (
 
 _LOGGER = LOGGER.getChild("mpas-regrid")
 
+OUTDIR = Path("/scratch3/NCEPDEV/stmp/Benjamin.Koziol/sandbox/data/mpas-aerosols/test-data")
+# OUTDIR = Path("/gpfs/f6/bil-fire8/scratch/Benjamin.Koziol/data/mpas-aerosols/test-data")
+COPY_TEST_DATA = False
+
 # Try to find the latest RAVE file available up to max_lookback_hours before target_time_str
 # to avoid setting zeroes when a particular hour file is missing.
 def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, max_lookback_hours=24):
@@ -51,6 +56,7 @@ def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, max_lookback_h
         paths = glob.glob(input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+this_str+"*")
         if paths:
             if h > 0:
+                raise ValueError(f"Missing RAVE file for {target_time_str}")
                 print(f"Missing RAVE file for {target_time_str}, using {this_str} instead")
             return paths
 
@@ -726,9 +732,15 @@ def main() -> None:
     cycle = sys.argv[6]  # Cycle Time, YYYYMMDDHH
     mesh_name = sys.argv[7]  # Name of the domain
     scrip_path = Path(sys.argv[8])  # Path to the input SCRIP/UGRID domain grid file
-    dst_path = Path(sys.argv[9])   # Path to the destination grid (e.g., init.nc)
+    dst_path = Path(sys.argv[9])  # Path to the destination grid (e.g., init.nc)
 
     ebb_dcycle = int(os.getenv('EBB_DCYCLE'))
+
+    if COPY_TEST_DATA and COMM.rank == 0:
+        shutil.copy2(scrip_path, OUTDIR)
+        shutil.copy2(dst_path, OUTDIR)
+    COMM.barrier()
+
     #
     # Test to see if scrip files exist
     # testpath = Path(weight_dir + "/scrip_files/mpas_" + mesh_name + "_scrip.nc")
@@ -737,9 +749,11 @@ def main() -> None:
     #    scrip_path = testpath
     # else:
     # FOR NOW, ALWAYS CREATE SCRIP
-    # scrip_path = Path(workdir + "/mpas_" + dataset_name + "-" + mesh_name + "_scrip.nc")
+    if scrip_path == "":
+        scrip_path = Path(workdir + "/mpas_" + dataset_name + "-" + mesh_name + "_scrip.nc")
     #
-    # dst_path = Path(workdir + "/init.nc")
+    if dst_path == "":
+        dst_path = Path(workdir + "/init.nc")
     desc_stats_out = Path(workdir + "/desc_stats-" + cycle + ".csv")
     #
     YYYY = cycle[0:4]
@@ -757,7 +771,6 @@ def main() -> None:
         DOWs = "sundy"
 
     # Calculate the number of cells in the
-    # num_cells = 5055722
     with open_nc(dst_path, mode="r", parallel=False) as src_nc:
         foo = src_nc.variables['latCell']
         num_cells = len(foo)
@@ -939,17 +952,22 @@ def main() -> None:
         processor = None
         for date_to_process in dates_needed:
             _LOGGER.info(f"RAVE processing {date_to_process=}")
-            rave_paths = find_latest_rave_file(input_dir, date_to_process, ebb_dcycle, max_lookback_hours=24)
-            #rave_paths = glob.glob(input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s" + date_to_process + "*")
-            #if len(rave_paths) == 0:
+            rave_paths = find_latest_rave_file(input_dir, date_to_process, ebb_dcycle,
+                                               max_lookback_hours=24)
+            # rave_paths = glob.glob(input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s" + date_to_process + "*")
+            # if len(rave_paths) == 0:
             #    print("No matching files found for " + input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s" + date_to_process + "*")
             #    continue
             if not rave_paths:
-                _LOGGER.warn(f"No matching files found for {date_to_process} (even after lookback).")
-                continue
+                _LOGGER.warn(
+                    f"No matching files found for {date_to_process} (even after lookback).")
+                raise ValueError("no rave file")
 
             _LOGGER.info(f'Reading RAVE file: {rave_paths=}')
             rave_path = rave_paths[0]
+            if COPY_TEST_DATA and COMM.rank == 0:
+                shutil.copy2(rave_path, OUTDIR)
+            COMM.barrier()
             new_dst_path = Path(output_dir + "/" + mesh_name + "-RAVE-" + date_to_process + ".nc")
             # --- OPTIMIZATION START ---
             if processor is None:
@@ -995,7 +1013,7 @@ def main() -> None:
             # Run the regridding (Fast)
             processor.run()
             # --- OPTIMIZATION END ---
-                    # Only finalize after ALL files are done
+            # Only finalize after ALL files are done
         if processor:
             processor.finalize()
 

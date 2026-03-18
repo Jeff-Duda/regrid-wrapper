@@ -31,14 +31,16 @@ if [[ ${HOSTNAME} == gaea6* ]]; then
 
   # cycle time in YYYYMMDDHH format
   cr_cycle=2026031600
-  # input directory for chem_regrid
-  cr_input_dir=/gpfs/f6/gsl-data-depot/world-shared/data/grids/nesdis/3km_fire_emissions
   # output directory for chem_regrid
   cr_output_dir=/gpfs/f6/bil-fire8/scratch/Benjamin.Koziol/data/mpas-aerosols/test-chem-regrid
+  # path to the fix directory for test files
+  cr_fix_test_dir=/gpfs/f6/bil-fire8/world-shared/Benjamin.Koziol/mpas-aerosols/test-data
   # path to source UGRID file
-  cr_scrip_path=/gpfs/f6/drsa-fire3/world-shared/Sudheer/MPAS/mpas-jedi/regridderBen/scrip_files/ugrid_fwx1.25km.nc
+  cr_scrip_path=${cr_fix_test_dir}/grid/ugrid_fwx1.25km.nc
   # path to destination grid file (init.nc)
-  cr_dst_path=/gpfs/f6/drsa-fire3/world-shared/Sudheer/Retros/MPAS/FWx1.25km/fwx.20250310/stmp/20260310/rrfs_ic_00_v2.1.2/det/ic_00/init.nc
+  cr_dst_path=${cr_fix_test_dir}/grid/init.nc
+  # input directory for chem_regrid
+  cr_input_dir=${cr_fix_test_dir}/rave
 
 elif [[ ${HOSTNAME} == ufe* ]]; then
   platform="ursa"
@@ -56,15 +58,17 @@ elif [[ ${HOSTNAME} == ufe* ]]; then
   # -----------
 
   # cycle time in YYYYMMDDHH format
-  cr_cycle=2026031200
-  # input directory for chem_regrid
-  cr_input_dir=/scratch4/BMC/public/data/grids/nesdis/3km_fire_emissions
+  cr_cycle=2026031300
   # output directory for chem_regrid
   cr_output_dir=/scratch3/NCEPDEV/stmp/Benjamin.Koziol/sandbox/data/mpas-aerosols/test-chem-regrid
-  # path to source SCRIP file
-  cr_scrip_path=/scratch4/BMC/acomp/Sudheer/Fire-nest/Shared/to_JeffDuda/scrip_files/ugrid_fwx1.25km.nc
+  # path to the fix directory for test files
+  cr_fix_test_dir=/scratch3/NCEPDEV/stmp/Benjamin.Koziol/sandbox/data/mpas-aerosols/test-data
+  # path to source UGRID file
+  cr_scrip_path=${cr_fix_test_dir}/grid/ugrid_fwx1.25km.nc
   # path to destination grid file (init.nc)
-  cr_dst_path=/scratch3/NCEPDEV/stmp/Benjamin.Koziol/sandbox/data/mpas-aerosols/init_5055722_cells.nc
+  cr_dst_path=${cr_fix_test_dir}/grid/init_5055722_cells.nc
+  # input directory for chem_regrid
+  cr_input_dir=${cr_fix_test_dir}/rave
 
 else
   echo "${HOSTNAME}" not recognized && exit 1

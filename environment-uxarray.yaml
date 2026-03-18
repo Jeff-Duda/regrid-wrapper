@@ -1,0 +1,10 @@
+name: regrid-wrapper-uxarray
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - uxarray
+  - nco
+  - netcdf4
+  - mpi4py

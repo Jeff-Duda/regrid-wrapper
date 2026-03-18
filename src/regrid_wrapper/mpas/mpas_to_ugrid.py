@@ -1,7 +1,6 @@
 import subprocess
 from pathlib import Path
 
-import uxarray as ux
 import netCDF4 as nc
 import xarray as xr
 import numpy as np
@@ -13,6 +12,8 @@ def _convert_mpas_to_ugrid_(input_path: Path) -> Path:
     """
     Reads an MPAS grid file using uxarray and writes it to a NetCDF file in UGRID format.
     """
+    import uxarray as ux
+
     LOGGER.info(f"Reading MPAS grid from: {input_path}")
     # uxarray.open_grid can read MPAS files directly
     uxgrid = ux.open_grid(input_path)

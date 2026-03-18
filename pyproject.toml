@@ -1,9 +1,25 @@
+[project]
+name = "regrid-wrapper"
+version = "0.0.1"
+description = "Lightweight wrapper around esmpy-based objects"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Ben Koziol", email = "benjamin.koziol@noaa.gov" }
+]
+
+[project.scripts]
+rw = "regrid_wrapper.app.rw_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
 markers = [
     "mpi: these tests are mpi-enabled",
     "integration: these tests require large data files"
 ]
-addopts ="-m 'not mpi'"
+addopts ="-m 'not mpi and not integration'"
 
 [tool.mypy]
 disallow_untyped_defs = true
