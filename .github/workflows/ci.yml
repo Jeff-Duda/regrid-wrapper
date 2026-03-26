@@ -1,9 +1,9 @@
 name: CI
 
 on:
-#  push:
+  push:
 #    branches: [ main ]
-  pull_request:
+#  pull_request:
 #    branches: [ main ]
 
 jobs:
@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: deckyfre/regrid-wrapper-ci:latest
+      options: --user root
     steps:
       - uses: actions/checkout@v4
 
