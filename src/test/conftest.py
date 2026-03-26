@@ -1,8 +1,7 @@
 import shutil
-import sys
-print(f"{sys.path=}")
 
-import random
+# import sys
+# print(f"{sys.path=}")
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, List
@@ -14,7 +13,6 @@ import xarray as xr
 from regrid_wrapper.context.comm import COMM
 from regrid_wrapper.context.env import ENV
 from regrid_wrapper.context.logging import LOGGER
-import netCDF4 as nc
 
 TEST_LOGGER = LOGGER.getChild("test")
 
@@ -37,7 +35,6 @@ def tmp_path_shared(tmp_path: Path) -> Path:
     return Path(COMM.bcast({"path": str(tmp_target)}, root=0)["path"])
 
 
-
 @contextmanager
 def custom_env(**kwargs: Any) -> Iterator[None]:
     orig = {}
@@ -58,9 +55,7 @@ def create_analytic_data_array(
     ntime: int | None = None,
 ) -> xr.DataArray:
     deg_to_rad = 3.141592653589793 / 180.0
-    analytic_data = 2.0 + np.cos(deg_to_rad * lon_mesh) ** 2 * np.cos(
-        2.0 * deg_to_rad * (90.0 - lat_mesh)
-    )
+    analytic_data = 2.0 + np.cos(deg_to_rad * lon_mesh) ** 2 * np.cos(2.0 * deg_to_rad * (90.0 - lat_mesh))
     if ntime is not None:
         time_modifier = np.arange(1, ntime + 1).reshape(ntime, 1, 1)
         analytic_data = analytic_data.reshape([1] + list(analytic_data.shape))
@@ -105,72 +100,6 @@ def create_rrfs_grid_file(
     return ds
 
 
-# def create_veg_map_file(path: Path, field_names: List[str]) -> xr.Dataset:
-#     if path.exists():
-#         raise ValueError(f"path exists: {path}")
-#     lon = np.linspace(230, 300, 71)
-#     lat = np.linspace(25, 50, 26)
-#     lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-#
-#     with nc.Dataset(path, "w") as ds:
-#         ds.createDimension("lon", 71)
-#         ds.createDimension("geolon", 71)
-#         ds.createDimension("lat", 26)
-#         ds.createDimension("geolat", 26)
-#         geolat = ds.createVariable("geolat", float, ("lat", "lon"))
-#         geolat[:] = lat_mesh
-#         geolon = ds.createVariable("geolon", float, ("lat", "lon"))
-#         geolon[:] = lon_mesh
-#         for field_name in field_names:
-#             field = ds.createVariable(field_name, float, ("geolat", "geolon"))
-#             field[:] = create_analytic_data_array(
-#                 ("geolat", "geolon"), lon_mesh, lat_mesh
-#             )
-#             field.setncattr("foo", random.random())
-#
-#     # ds = xr.Dataset()
-#     # dims = ["geolat", "geolon"]
-#     # ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
-#     # ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
-#     # for field_name in field_names:
-#     #     ds[field_name] = create_analytic_data_array(dims, lon_mesh, lat_mesh)
-#     #     ds[field_name].attrs["foo"] = random.random()
-#     # ds.to_netcdf(path)
-#
-#     return ds
-
-
-# DUST_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in ("foo", "bar")}
-#
-#
-# def create_dust_data_file(path: Path) -> xr.Dataset:
-#     if path.exists():
-#         raise ValueError(f"path exists: {path}")
-#
-#     lon = np.linspace(230, 300, 71)
-#     lat = np.linspace(25, 50, 26)
-#     lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-#     ds = xr.Dataset()
-#     dims = ["lat", "lon"]
-#     ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
-#     ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
-#
-#     ds["time"] = xr.DataArray(np.arange(12, dtype=np.double), dims=["time"])
-#
-#     for coord_name in ["time", "geolat", "geolon"]:
-#         ds[coord_name].attrs["foo"] = random.random()
-#
-#     for field_name in ("foo", "bar"):
-#         ds[field_name] = create_analytic_data_array(
-#             ["time", "lat", "lon"], lon_mesh, lat_mesh, ntime=12
-#         )
-#         ds[field_name] += DUST_FIELD_OFFSETS[field_name]
-#         ds[field_name].attrs["foo"] = random.random()
-#     ds.attrs["foo"] = random.random()
-#     ds.to_netcdf(path)
-#     return ds
-
-
 def assert_zero_sum_diff(actual: np.ndarray, expected: np.ndarray) -> None:
     assert (actual - expected).sum() == 0
 
@@ -180,3 +109,9 @@ def ugrid_path(bin_dir: Path) -> Path:
     ret = Path(bin_dir) / "mesh.QU.1920km.151026.ugrid.nc"
     assert ret.exists()
     return ret
+
+
+def create_data_array(name: str, dims: dict[str, int]) -> xr.DataArray:
+    shape = tuple(ii for ii in dims.values())
+    data = np.random.random(shape)
+    return xr.DataArray(data, name=name, dims=tuple(ii for ii in dims.keys()))

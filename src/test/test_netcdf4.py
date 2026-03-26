@@ -1,11 +1,8 @@
 from pathlib import Path
 
+import netCDF4 as nc
 import pytest
 from mpi4py import MPI
-
-import netCDF4 as nc
-
-from regrid_wrapper.context.env import ENV
 
 
 @pytest.mark.mpi

@@ -9,8 +9,8 @@ def test(tmp_path_shared: Path) -> None:
     _ = create_rrfs_grid_file(data)
 
     params = DescribeParams(
-        files=[data],
-        varnames=["grid_lont", "grid_latt"],
+        files=(data,),
+        varnames=("grid_lont", "grid_latt"),
         namespace="dust",
         csv_out=tmp_path_shared / "summary.csv",
     )

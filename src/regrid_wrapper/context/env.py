@@ -1,10 +1,11 @@
 import logging
 import os
 from dataclasses import dataclass
-from enum import unique, StrEnum
-
+from enum import StrEnum, unique
 from pathlib import Path
+
 from mpi4py import MPI
+
 
 @unique
 class Platform(StrEnum):
@@ -22,10 +23,7 @@ class Environment:
 
     def create_log_file_path(self) -> Path:
         comm = MPI.COMM_WORLD
-        return (
-            Path(self.REGRID_WRAPPER_LOG_DIR)
-            / f"{self.REGRID_WRAPPER_LOG_PREFIX}-{str(comm.Get_rank()).zfill(4)}.log"
-        )
+        return Path(self.REGRID_WRAPPER_LOG_DIR) / f"{self.REGRID_WRAPPER_LOG_PREFIX}-{str(comm.Get_rank()).zfill(4)}.log"
 
     def __post_init__(self) -> None:
         platform = os.environ.get("REGRID_WRAPPER_PLATFORM", "URSA")

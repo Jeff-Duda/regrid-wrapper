@@ -1,8 +1,8 @@
 import logging
 import logging.config
 
-from regrid_wrapper.context.env import ENV
 from regrid_wrapper.context.comm import COMM
+from regrid_wrapper.context.env import ENV
 
 
 def init_logging() -> logging.Logger:
@@ -12,7 +12,7 @@ def init_logging() -> logging.Logger:
         "disable_existing_loggers": True,
         "formatters": {
             "plain": {
-                "format": f"[%(name)s][%(levelname)s][%(asctime)s][%(pathname)s:%(lineno)d][%(process)d][%(thread)d][{COMM.rank}]: %(message)s"
+                "format": f"[%(name)s][%(levelname)s][%(asctime)s][%(pathname)s:%(lineno)d][%(process)d][%(thread)d][{COMM.rank}]: %(message)s"  # noqa: E501
             },
         },
         "handlers": {

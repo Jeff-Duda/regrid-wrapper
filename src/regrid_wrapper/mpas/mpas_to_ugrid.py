@@ -2,8 +2,8 @@ import subprocess
 from pathlib import Path
 
 import netCDF4 as nc
-import xarray as xr
 import numpy as np
+import xarray as xr
 
 from regrid_wrapper.context.logging import LOGGER
 
@@ -12,10 +12,9 @@ def _convert_mpas_to_ugrid_(input_path: Path) -> Path:
     """
     Reads an MPAS grid file using uxarray and writes it to a NetCDF file in UGRID format.
     """
-    import uxarray as ux
+    import uxarray as ux  # type: ignore
 
     LOGGER.info(f"Reading MPAS grid from: {input_path}")
-    # uxarray.open_grid can read MPAS files directly
     uxgrid = ux.open_grid(input_path)
     LOGGER.info(uxgrid)
 
@@ -23,7 +22,7 @@ def _convert_mpas_to_ugrid_(input_path: Path) -> Path:
     LOGGER.info(f"Writing UGRID to: {output_path}")
     uxgrid.to_xarray().to_netcdf(output_path)
     LOGGER.info("Conversion completed successfully.")
-    return output_path
+    return Path(output_path)
 
 
 def _fix_conversion_(input_path: Path, output_path: Path) -> None:
@@ -66,19 +65,10 @@ def _fix_conversion_(input_path: Path, output_path: Path) -> None:
 
     LOGGER.info("done with conversion")
 
+
 def run_conversion(input_path: Path, output_path: Path) -> None:
     tmp_ugrid_path = _convert_mpas_to_ugrid_(input_path)
     try:
         _fix_conversion_(tmp_ugrid_path, output_path)
     finally:
         Path(tmp_ugrid_path).unlink()
-
-# if __name__ == "__main__":
-#     input_path = "/scratch4/BMC/acomp/Sudheer/Fire-nest/Retros/MPAS/BensTest/conus3km/conus3km.20250922/stmp/20250922/rrfs_ic_00_v2.1.2/det/ic_00/init.nc"
-#     output_path = "/scratch3/NCEPDEV/stmp/Benjamin.Koziol/sandbox/data/mpas-aerosols/ugrid.nc"
-#
-#     tmp_ugrid_path = convert_mpas_to_ugrid(input_path)
-#     try:
-#         fix_conversion(tmp_ugrid_path, output_path)
-#     finally:
-#         Path(tmp_ugrid_path).unlink()

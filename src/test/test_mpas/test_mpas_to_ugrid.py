@@ -1,35 +1,29 @@
 import pytest
 
 try:
-    import uxarray as ux
+    import uxarray as ux  # type: ignore # noqa: F401
 except ImportError:
     pytest.skip("uxarray not installed", allow_module_level=True)
 
-import shutil
+import time
 from pathlib import Path
 
+import esmpy
 import pytest
 
-from regrid_wrapper.common import ncdump
 from regrid_wrapper.context.comm import COMM
-from regrid_wrapper.esmpy.field_wrapper import NcToGrid, GridSpec, NcToField, NcToMesh, MeshWrapper, \
-    open_nc
 from regrid_wrapper.mpas.mpas_to_ugrid import run_conversion
-import esmpy
-import time
-
-from test.conftest import TEST_LOGGER, create_rrfs_grid_file
+from test.conftest import TEST_LOGGER
 
 
 def read_ugrid_mesh(input_path: Path) -> esmpy.Mesh:
     manager = esmpy.Manager()
     t1 = time.perf_counter()
-    mesh = esmpy.Mesh(
-        filename=str(input_path), filetype=esmpy.FileFormat.UGRID, meshname="grid_topology"
-    )
+    mesh = esmpy.Mesh(filename=str(input_path), filetype=esmpy.FileFormat.UGRID, meshname="grid_topology")
     t2 = time.perf_counter()
     TEST_LOGGER.debug(f"mesh read time: {t2 - t1} s, {manager.pet_count=}")
     return mesh
+
 
 @pytest.fixture
 def ugrid_path(tmp_path_shared: Path) -> Path:
@@ -48,6 +42,7 @@ def ugrid_path(tmp_path_shared: Path) -> Path:
 def ugrid_esmpy_mesh(ugrid_path: Path) -> esmpy.Mesh:
     mesh = read_ugrid_mesh(ugrid_path)
     return mesh
+
 
 @pytest.mark.mpi
 def test_mpas_to_ugrid(ugrid_esmpy_mesh: esmpy.Mesh) -> None:

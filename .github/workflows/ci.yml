@@ -1,0 +1,25 @@
+name: CI
+
+on:
+#  push:
+#    branches: [ main ]
+  pull_request:
+#    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    container:
+      image: deckyfre/regrid-wrapper-ci:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: bash .github/workflows/ci-env.sh
+
+      - name: Run linter
+        run: bash .github/workflows/ci-lint.sh
+
+      - name: Run tests
+        if: always()
+        run: bash .github/workflows/ci-test.sh

@@ -9,9 +9,9 @@ from regrid_wrapper.app.rave_to_mpas import RaveGridSpec
 from regrid_wrapper.context.comm import COMM
 from regrid_wrapper.context.env import ENV, Platform
 from regrid_wrapper.esmpy.field_wrapper import (
+    NcToField,
     NcToGrid,
     NcToMesh,
-    NcToField,
     open_nc,
     set_variable_data,
 )
@@ -24,9 +24,7 @@ def region_start(name: str) -> float:
 
 
 def region_end(name: str, start: float) -> None:
-    TEST_LOGGER.info(
-        f"Ending time_region[{COMM.rank}]={name}; time={time.perf_counter() - start} s"
-    )
+    TEST_LOGGER.info(f"Ending time_region[{COMM.rank}]={name}; time={time.perf_counter() - start} s")
 
 
 @dataclass
@@ -41,9 +39,7 @@ class _TestDataUrsa(_TestData):
     src_path: Path = Path(
         "/scratch4/BMC/public/data/grids/nesdis/3km_fire_emissions/RAVE-HrlyEmiss-3km_v2r0_blend_s202603121200000_e202603121259590_c202603121402030.nc"
     )
-    dst_path: Path = Path(
-        "/scratch4/BMC/acomp/Sudheer/Fire-nest/Shared/to_JeffDuda/scrip_files/ugrid_fwx1.25km.nc"
-    )
+    dst_path: Path = Path("/scratch4/BMC/acomp/Sudheer/Fire-nest/Shared/to_JeffDuda/scrip_files/ugrid_fwx1.25km.nc")
     output_root: Path = Path("/home/Benjamin.Koziol/htmp")
 
 
@@ -52,9 +48,7 @@ class _TestDataGaeaC6(_TestData):
     src_path: Path = Path(
         "/gpfs/f6/gsl-data-depot/world-shared/data/grids/nesdis/3km_fire_emissions/RAVE-HrlyEmiss-3km_v2r0_blend_s202603121200000_e202603121259590_c202603121402030.nc"
     )
-    dst_path: Path = Path(
-        "/gpfs/f6/drsa-fire3/world-shared/Sudheer/MPAS/mpas-jedi/regridderBen/scrip_files/ugrid_fwx1.25km.nc"
-    )
+    dst_path: Path = Path("/gpfs/f6/drsa-fire3/world-shared/Sudheer/MPAS/mpas-jedi/regridderBen/scrip_files/ugrid_fwx1.25km.nc")
     output_root: Path = Path("/autofs/ncrc-svm1_home2/Benjamin.Koziol/htmp")
 
 
@@ -83,9 +77,7 @@ def test() -> None:
     rave_gridspec = RaveGridSpec()
     rave_nc2grid = NcToGrid(path=test_data.src_path, spec=rave_gridspec)
     rave_gwrap = rave_nc2grid.create_grid_wrapper()
-    rave_nc2field = NcToField(
-        path=test_data.src_path, name="FRE", dim_time=("time",), gwrap=rave_gwrap
-    )
+    rave_nc2field = NcToField(path=test_data.src_path, name="FRE", dim_time=("time",), gwrap=rave_gwrap)
     rave_fwrap = rave_nc2field.create_field_wrapper()
     region_end("rave field", t1)
 
@@ -129,6 +121,7 @@ def test() -> None:
         var = ds.variables["FRE"]
         set_variable_data(var, mpas_fwrap.dims, mpas_fwrap.value.data)
     region_end("write field data", t1)
+
 
 if __name__ == "__main__":
     test()

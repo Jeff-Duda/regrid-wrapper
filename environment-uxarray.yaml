@@ -8,3 +8,5 @@ dependencies:
   - nco
   - netcdf4
   - mpi4py
+  - nccmp
+  - pydantic

@@ -1,6 +1,7 @@
 import argparse
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from regrid_wrapper.app.rw_cli import mpas_to_ugrid_cli

@@ -21,7 +21,19 @@ markers = [
 ]
 addopts ="-m 'not mpi and not integration'"
 
+[tool.ruff]
+line-length = 132
+
+[tool.ruff.lint]
+#select = ["E", "F", "I", "D"] TODO: Turn on doc checks when doc strategy determined
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+quote-style = "double"
+
 [tool.mypy]
-disallow_untyped_defs = true
-install_types = true
-#ignore_missing_imports = true
+exclude = ["src/regrid_wrapper/app/chem_regrid.py"]
+disable_error_code = ["import-untyped"]
