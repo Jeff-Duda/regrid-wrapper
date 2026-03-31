@@ -5,3 +5,10 @@
 /logs/
 /outputs/
 __pycache__/
+/data/
+
+.output.txt
+
+*.DS_Store
+
+src/regrid_wrapper.egg-info/

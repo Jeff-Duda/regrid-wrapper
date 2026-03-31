@@ -1,12 +1,39 @@
+[project]
+name = "regrid-wrapper"
+version = "0.0.1"
+description = "Lightweight wrapper around esmpy-based objects"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Ben Koziol", email = "benjamin.koziol@noaa.gov" }
+]
+
+[project.scripts]
+rw = "regrid_wrapper.app.rw_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
 markers = [
-    "integration: test requires access to an external resource",
-    "slow: these tests take FOREVER",
-    "mpi: these tests are mpi-enabled"
+    "mpi: these tests are mpi-enabled",
+    "integration: these tests require large data files"
 ]
-#addopts = "-s"
+addopts ="-m 'not mpi and not integration'"
+
+[tool.ruff]
+line-length = 132
+
+[tool.ruff.lint]
+#select = ["E", "F", "I", "D"] TODO: Turn on doc checks when doc strategy determined
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.mypy]
-disallow_untyped_defs = true
-install_types = true
-#ignore_missing_imports = true
+exclude = ["src/regrid_wrapper/app/chem_regrid.py"]
+disable_error_code = ["import-untyped"]

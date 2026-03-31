@@ -1,0 +1,11 @@
+FROM deckyfre/regrid-wrapper-spack:latest
+
+SHELL ["/bin/bash", "-c"]
+
+RUN <<INSTALL_PRECOMMIT
+  set -eu
+  cd /opt/regrid-wrapper/spack-stack
+  . ./setup.sh
+  spack env activate regrid-wrapper
+  pip install mypy ruff pre-commit types-PyYAML pandas-stubs
+INSTALL_PRECOMMIT

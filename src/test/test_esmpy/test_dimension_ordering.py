@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import numpy as np
 import esmpy
+import numpy as np
 
 from regrid_wrapper.common import ncdump
 
