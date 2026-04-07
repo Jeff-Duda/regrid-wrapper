@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
+from regrid_wrapper.app.chem_regrid.context import ChemRegridContext
 from regrid_wrapper.context.comm import COMM, reconcile_bounds
 from regrid_wrapper.context.logging import LOGGER
 from regrid_wrapper.esmpy.field_wrapper import (
@@ -44,11 +45,11 @@ def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, max_lookback_h
         elif ebb_dcycle == 1:
            this_time = target_time + timedelta(hours=h)
         else:
-           _LOGGER.info("unrecognized ebb_dcycle, reverting to same-day, ebb_dcycle = 1")
+           _LOGGER.warning("unrecognized ebb_dcycle, reverting to same-day, ebb_dcycle = 1")
            this_time = target_time + timedelta(hours=h)
 
         this_str = this_time.strftime(fmt)
-        paths = glob.glob(input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+this_str+"*")
+        paths = glob.glob(str(input_dir) + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+this_str+"*")
         if paths:
             if h > 0:
                 print(f"Missing RAVE file for {target_time_str}, using {this_str} instead")
@@ -957,38 +958,20 @@ class RaveToMpasRegridProcessor:
         src_mesh.destroy()
 
 
-def main() -> None:
-    dataset_name = sys.argv[1]  # Which dataset are we interpolating?
-    workdir = sys.argv[2]  # Directory where operations will be processed
-    input_dir = sys.argv[3]  # Top directory of input data
-    output_dir = sys.argv[4]  # Top directory of output data
-    weight_dir = sys.argv[5]  # Directory that contains the regrid weights
-    cycle = sys.argv[6]  # Cycle Time, YYYYMMDDHH
-    try:
-        scrip_path = Path(sys.argv[7])  # Path to the input SCRIP/UGRID domain grid file
-        dst_path = Path(sys.argv[8])  # Path to the destination grid (e.g., init.nc)
-    except IndexError:
-        scrip_path = None
-        dst_path = None
+def main(ctx: ChemRegridContext) -> None:
+    dataset_name = ctx.dataset_name.value  # Which dataset are we interpolating?
+    workdir = ctx.workdir  # Directory where operations will be processed
+    input_dir = ctx.input_dir  # Top directory of input data
+    output_dir = ctx.output_dir  # Top directory of output data
+    weight_dir = ctx.weight_dir  # Directory that contains the regrid weights
+    cycle = ctx.cycle
+    scrip_path = ctx.rw_scrip_path # Cycle Time, YYYYMMDDHH
+    dst_path = ctx.dst_path
+    mesh_name = ctx.mesh_name
+    ebb_dcycle = ctx.ebb_dcycle
+    fcst_length = ctx.fcst_length
 
-    #mesh_name  = os.getenv('MESH_NAME')
-    ebb_dcycle = int(os.getenv('EBB_DCYCLE'))
-    fcst_length= int(os.getenv('FCST_LENGTH'))
-    mesh_name  = os.getenv('MESH_NAME')
-    #
-    # Test to see if scrip files exist
-    # testpath = Path(weight_dir + "/scrip_files/mpas_" + mesh_name + "_scrip.nc")
-    # If we have the file set the path, otherwise it will be built in the workdir
-    # if testpath.exists():
-    #    scrip_path = testpath
-    # else:
-    # FOR NOW, ALWAYS CREATE SCRIP
-    if scrip_path is None:
-        scrip_path = Path(workdir + "/mpas_" + dataset_name + "-" + mesh_name + "_scrip.nc")
-    #
-    if dst_path is None:
-        dst_path = Path(workdir + "/init.nc")
-    desc_stats_out = Path(workdir + "/desc_stats-" + cycle + ".csv")
+    desc_stats_out = ctx.rw_desc_stats_out
     #
     YYYY = cycle[0:4]
     MM = cycle[4:6]
@@ -1229,7 +1212,7 @@ def main() -> None:
         time_size = 1
         InterpMethod = "BILINEAR"
 
-    weight_path = Path(weight_dir + "/weights_" + dataset_name + "-to-" + "mpas_" + mesh_name + "_" + InterpMethod + ".nc")
+    weight_path = ctx.get_weight_path(InterpMethod)
 
     if dataset_name == "RAVE":
         processor = None
@@ -1248,7 +1231,7 @@ def main() -> None:
 
             _LOGGER.info(f'Reading RAVE file: {rave_paths=}')
             rave_path = rave_paths[0]
-            new_dst_path = Path(output_dir + "/" + mesh_name + "-RAVE-" + date_to_process + ".nc")
+            new_dst_path = output_dir / (mesh_name + "-RAVE-" + date_to_process + ".nc")
 
             # --- OPTIMIZATION START ---
             if processor is None:
@@ -1519,7 +1502,3 @@ def main() -> None:
         processor.finalize()
 
         _LOGGER.info("success")
-
-
-if __name__ == "__main__":
-    main()
