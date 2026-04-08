@@ -1,6 +1,12 @@
-from typing import Any, List
+from enum import IntEnum, unique
+from typing import Any
 
 from mpi4py import MPI
+
+
+@unique
+class Tag(IntEnum):
+    SET_VARIABLE_DATA = 1
 
 
 class Comm:
@@ -26,12 +32,18 @@ class Comm:
     def allgather(self, target: Any) -> Any:
         return self._comm.allgather(target)
 
+    def send(self, *args: Any, **kwargs: Any) -> None:
+        self._comm.send(*args, **kwargs)
+
+    def recv(self, *args: Any, **kwargs: Any) -> Any:
+        return self._comm.recv(*args, **kwargs)
+
 
 COMM = Comm()
 
 
 def reconcile_bounds(bounds: tuple[int, int]) -> tuple[int, int]:
-    from regrid_wrapper.context.logging import LOGGER  # tdk: avoid local import
+    from regrid_wrapper.context.logging import LOGGER
 
     LOGGER.debug(f"{bounds=}")
     all_bounds = COMM.allgather(bounds)
@@ -42,8 +54,7 @@ def reconcile_bounds(bounds: tuple[int, int]) -> tuple[int, int]:
             reconciled_bounds[idx] = list(all_bounds[idx])
         else:
             reconciled_bounds[idx][0] = reconciled_bounds[idx - 1][1]
-            reconciled_bounds[idx][1] = reconciled_bounds[idx - 1][1] + (
-                all_bounds[idx][1] - all_bounds[idx][0]
-            )
+            reconciled_bounds[idx][1] = reconciled_bounds[idx - 1][1] + (all_bounds[idx][1] - all_bounds[idx][0])
     LOGGER.debug(f"{reconciled_bounds=}")
-    return tuple(reconciled_bounds[COMM.rank])
+    return_bounds = reconciled_bounds[COMM.rank]
+    return return_bounds[0], return_bounds[1]

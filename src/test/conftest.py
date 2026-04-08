@@ -1,23 +1,18 @@
-import random
+import shutil
+
+# import sys
+# print(f"{sys.path=}")
 from contextlib import contextmanager
-from dataclasses import field
 from pathlib import Path
-from typing import Any, Iterator, Sequence, List, Dict
+from typing import Any, Iterator, List
 
 import numpy as np
 import pytest
 import xarray as xr
-from pydantic import BaseModel
 
-from regrid_wrapper.concrete.emi_data import EMI_DATA_ENV
-from regrid_wrapper.concrete.rrfs_dust_data import RRFS_DUST_DATA_ENV
 from regrid_wrapper.context.comm import COMM
 from regrid_wrapper.context.env import ENV
 from regrid_wrapper.context.logging import LOGGER
-from regrid_wrapper.model.spec import (
-    GenerateWeightFileSpec,
-)
-import netCDF4 as nc
 
 TEST_LOGGER = LOGGER.getChild("test")
 
@@ -29,49 +24,28 @@ def bin_dir() -> Path:
 
 @pytest.fixture
 def tmp_path_shared(tmp_path: Path) -> Path:
-    return Path(COMM.bcast({"path": str(tmp_path)}, root=0)["path"])
-
-
-@pytest.fixture
-def fake_spec(tmp_path_shared: Path) -> GenerateWeightFileSpec:
-    src_path = tmp_path_shared / "src.nc"
-    src_path.touch()
-    dst_path = tmp_path_shared / "dst.nc"
-    dst_path.touch()
-    output_weight_filename = tmp_path_shared / "weights.nc"
-    spec = GenerateWeightFileSpec(
-        name="fake",
-        src_path=src_path,
-        dst_path=dst_path,
-        output_weight_filename=output_weight_filename,
-    )
-    return spec
-
-
-@contextmanager
-def unfreeze_pydantic_models(models: Sequence[BaseModel]) -> Iterator[None]:
-    for model in models:
-        model.model_config["frozen"] = False
-    try:
-        yield
-    finally:
-        for model in models:
-            model.model_config["frozen"] = True
+    if ENV.REGRID_WRAPPER_TEST_TMPDIR is None:
+        tmp_target = tmp_path
+    else:
+        tmp_target = ENV.REGRID_WRAPPER_TEST_TMPDIR / tmp_path.name
+        if COMM.rank == 0:
+            if tmp_target.exists():
+                shutil.rmtree(tmp_target)
+            tmp_target.mkdir(exist_ok=False, parents=False)
+    return Path(COMM.bcast({"path": str(tmp_target)}, root=0)["path"])
 
 
 @contextmanager
 def custom_env(**kwargs: Any) -> Iterator[None]:
     orig = {}
-    with unfreeze_pydantic_models([ENV]):
-        for k, v in kwargs.items():
-            orig[k] = getattr(ENV, k)
-            setattr(ENV, k, v)
+    for k, v in kwargs.items():
+        orig[k] = getattr(ENV, k)
+        setattr(ENV, k, v)
     try:
         yield
     finally:
-        with unfreeze_pydantic_models([ENV]):
-            for k, v in orig.items():
-                setattr(ENV, k, v)
+        for k, v in orig.items():
+            setattr(ENV, k, v)
 
 
 def create_analytic_data_array(
@@ -81,9 +55,7 @@ def create_analytic_data_array(
     ntime: int | None = None,
 ) -> xr.DataArray:
     deg_to_rad = 3.141592653589793 / 180.0
-    analytic_data = 2.0 + np.cos(deg_to_rad * lon_mesh) ** 2 * np.cos(
-        2.0 * deg_to_rad * (90.0 - lat_mesh)
-    )
+    analytic_data = 2.0 + np.cos(deg_to_rad * lon_mesh) ** 2 * np.cos(2.0 * deg_to_rad * (90.0 - lat_mesh))
     if ntime is not None:
         time_modifier = np.arange(1, ntime + 1).reshape(ntime, 1, 1)
         analytic_data = analytic_data.reshape([1] + list(analytic_data.shape))
@@ -128,100 +100,18 @@ def create_rrfs_grid_file(
     return ds
 
 
-def create_veg_map_file(path: Path, field_names: List[str]) -> xr.Dataset:
-    if path.exists():
-        raise ValueError(f"path exists: {path}")
-    lon = np.linspace(230, 300, 71)
-    lat = np.linspace(25, 50, 26)
-    lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-
-    with nc.Dataset(path, "w") as ds:
-        ds.createDimension("lon", 71)
-        ds.createDimension("geolon", 71)
-        ds.createDimension("lat", 26)
-        ds.createDimension("geolat", 26)
-        geolat = ds.createVariable("geolat", float, ("lat", "lon"))
-        geolat[:] = lat_mesh
-        geolon = ds.createVariable("geolon", float, ("lat", "lon"))
-        geolon[:] = lon_mesh
-        for field_name in field_names:
-            field = ds.createVariable(field_name, float, ("geolat", "geolon"))
-            field[:] = create_analytic_data_array(
-                ("geolat", "geolon"), lon_mesh, lat_mesh
-            )
-            field.setncattr("foo", random.random())
-
-    # ds = xr.Dataset()
-    # dims = ["geolat", "geolon"]
-    # ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
-    # ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
-    # for field_name in field_names:
-    #     ds[field_name] = create_analytic_data_array(dims, lon_mesh, lat_mesh)
-    #     ds[field_name].attrs["foo"] = random.random()
-    # ds.to_netcdf(path)
-
-    return ds
-
-
-DUST_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in RRFS_DUST_DATA_ENV.fields}
-
-
-def create_dust_data_file(path: Path) -> xr.Dataset:
-    if path.exists():
-        raise ValueError(f"path exists: {path}")
-
-    lon = np.linspace(230, 300, 71)
-    lat = np.linspace(25, 50, 26)
-    lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-    ds = xr.Dataset()
-    dims = ["lat", "lon"]
-    ds["geolat"] = xr.DataArray(lat_mesh, dims=dims)
-    ds["geolon"] = xr.DataArray(lon_mesh, dims=dims)
-
-    ds["time"] = xr.DataArray(np.arange(12, dtype=np.double), dims=["time"])
-
-    for coord_name in ["time", "geolat", "geolon"]:
-        ds[coord_name].attrs["foo"] = random.random()
-
-    for field_name in RRFS_DUST_DATA_ENV.fields:
-        ds[field_name] = create_analytic_data_array(
-            ["time", "lat", "lon"], lon_mesh, lat_mesh, ntime=12
-        )
-        ds[field_name] += DUST_FIELD_OFFSETS[field_name]
-        ds[field_name].attrs["foo"] = random.random()
-    ds.attrs["foo"] = random.random()
-    ds.to_netcdf(path)
-    return ds
-
-
-EMI_FIELD_OFFSETS = {ii: random.randint(1, 1000) for ii in EMI_DATA_ENV.fields}
-
-
-def create_emi_data_file(path: Path) -> xr.Dataset:
-    if path.exists():
-        raise ValueError(f"path exists: {path}")
-
-    lon = np.linspace(230, 300, 71)
-    lat = np.linspace(25, 50, 26)
-    lon_mesh, lat_mesh = np.meshgrid(lon, lat)
-    ds = xr.Dataset()
-    dims = ["grid_yt", "grid_xt"]
-    ds["grid_latt"] = xr.DataArray(lat_mesh, dims=dims)
-    ds["grid_lont"] = xr.DataArray(lon_mesh, dims=dims)
-
-    for coord_name in ["grid_latt", "grid_lont"]:
-        ds[coord_name].attrs["foo"] = random.random()
-
-    for field_name in EMI_DATA_ENV.fields:
-        ds[field_name] = create_analytic_data_array(
-            ["time", "grid_yt", "grid_xt"], lon_mesh, lat_mesh, ntime=1
-        )
-        ds[field_name] += EMI_FIELD_OFFSETS[field_name]
-        ds[field_name].attrs["foo"] = random.random()
-    ds.attrs["foo"] = random.random()
-    ds.to_netcdf(path)
-    return ds
-
-
 def assert_zero_sum_diff(actual: np.ndarray, expected: np.ndarray) -> None:
     assert (actual - expected).sum() == 0
+
+
+@pytest.fixture
+def ugrid_path(bin_dir: Path) -> Path:
+    ret = Path(bin_dir) / "mesh.QU.1920km.151026.ugrid.nc"
+    assert ret.exists()
+    return ret
+
+
+def create_data_array(name: str, dims: dict[str, int]) -> xr.DataArray:
+    shape = tuple(ii for ii in dims.values())
+    data = np.random.random(shape)
+    return xr.DataArray(data, name=name, dims=tuple(ii for ii in dims.keys()))
