@@ -37,11 +37,13 @@ _LOGGER = LOGGER.getChild("mpas-regrid")
 
 # Try to find the latest RAVE file available up to max_lookback_hours before target_time_str
 # to avoid setting zeroes when a particular hour file is missing.
-def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, max_lookback_hours=24):
+def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, dataset_name, max_lookback_hours=24):
     """Return list of files for the latest time <= target_time_str."""
     fmt = "%Y%m%d%H"  #RAVE
     fmt2= "%Y%j%H"  # GOES
     target_time = datetime.strptime(target_time_str, fmt)
+
+    input_dir_str = str(input_dir)
 
     for h in range(max_lookback_hours + 1):
         if ebb_dcycle == -1 or ebb_dcycle == 2:
@@ -54,10 +56,10 @@ def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, max_lookback_h
 
         if dataset_name == "RAVE":
            this_str = this_time.strftime(fmt)
-           paths = glob.glob(input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+this_str+"*")
+           paths = glob.glob(input_dir_str + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+this_str+"*")
         elif dataset_name == "GOES":
            this_str = this_time.strftime(fmt2)
-           paths = glob.glob(input_dir + "/OR_ABI-L2-AODC-M6_G18_s"+this_str+"*")
+           paths = glob.glob(input_dir_str + "/OR_ABI-L2-AODC-M6_G18_s"+this_str+"*")
         if paths:
             if h > 0:
                 print(f"Missing {dataset_name} file for {target_time_str}, using {this_str} instead")
@@ -232,6 +234,7 @@ class RaveField3d_plusTime(AbstractRaveField):
 
 class RaveToMpasRegridContext(BaseModel):
     dataset_name: str
+    workdir: Path
     src_path: Path
     dst_path: Path
     new_dst_path: Path
@@ -340,7 +343,7 @@ class RaveToMpasRegridProcessor:
 
 # JLS - temporary fix for coords not in file
         if self.context.dataset_name == "GOES":
-           pathsrc=workdir+"/goes19_abi_conus_interpolated_lat_lon.nc"
+           pathsrc=self.context.workdir / "goes19_abi_conus_interpolated_lat_lon.nc"
         else:
            pathsrc=self.context.src_path
         _LOGGER.info("create source grid")
@@ -475,13 +478,14 @@ class RaveToMpasRegridProcessor:
         if self.context.rank == 0:
             with open_nc(self.context.new_dst_path, mode="w", clobber=True, parallel=False) as dst_nc:
                 dst_nc.createDimension("nCells", self.context.num_cells)
-                dst_nc.createDimension(self.context.level_out_name, self.context.level_out_size)
+                if self.context.level_out_name != "None":
+                    dst_nc.createDimension(self.context.level_out_name, self.context.level_out_size)
                 dst_nc.createDimension("StrLen", 64)
                 if self.context.time_size > 1:
                     dst_nc.createDimension("Time", self.context.time_size)
                 elif self.context.time_size == 1:
-                    dst_nc.createDimension("Time")
-                else:
+                    if "Time" not in dst_nc.dimensions:
+                        dst_nc.createDimension("Time")
                     _LOGGER.info("Not creating a time dimension")
                 dst_nc.setncattr("created_at", str(datetime.now(timezone.utc)))
                 dst_nc.setncattr("src_path", str(self.context.src_path))
@@ -516,7 +520,7 @@ class RaveToMpasRegridProcessor:
             with open_nc(self.context.new_dst_path, mode="a") as ds:
                 if self.context.dataset_name == "RAVE" and rave_field.name in ("FRP_MEAN", "FRE"):
                     area = np.asarray(ds.variables['areaCell'])
-                    area_subset = area[reconciled_bounds[0]:reconciled_bounds[1]]
+                    area_subset = area[reconciled_bounds[0]:reconciled_bounds[1]].reshape(dims.shape_local)
                 _LOGGER.info(f"creating variable {rave_field.name=}")
                 var = ds.createVariable(
                     rave_field.name,
@@ -524,7 +528,7 @@ class RaveToMpasRegridProcessor:
                     [dim.name[0] for dim in dims.value],
                     fill_value=rave_field.fill_value,
                 )
-# Don't carry over fill value and datatype
+                # Don't carry over fill value and datatype
                 if self.context.dataset_name != 'GOES':
                     type_to_use = rave_field.dtype
                     for k, v in rave_field.attrs.items():
@@ -1168,7 +1172,7 @@ def main(ctx: ChemRegridContext) -> None:
         level_in_name = "None"
         level_out_name = "None"
         level_out_size = 0
-        time_name = "time"
+        time_name = "None"
         time_size = 0
         InterpMethod = "BILINEAR"
     elif dataset_name == "FENGSHA_2D_Time":
@@ -1242,7 +1246,7 @@ def main(ctx: ChemRegridContext) -> None:
         processor = None
         for date_to_process in dates_needed:
             _LOGGER.info(f"RAVE processing {date_to_process=}")
-            rave_paths = find_latest_rave_file(input_dir, date_to_process, ebb_dcycle, max_lookback_hours=24)
+            rave_paths = find_latest_rave_file(input_dir, date_to_process, ebb_dcycle, dataset_name, max_lookback_hours=24)
             if not rave_paths:
                 _LOGGER.warn(
                     f"No matching files found for {date_to_process} (even after lookback).")
@@ -1259,6 +1263,7 @@ def main(ctx: ChemRegridContext) -> None:
 
                 context = RaveToMpasRegridContext(
                     dataset_name=dataset_name,
+                    workdir=workdir,
                     src_path=rave_path,
                     dst_path=dst_path,
                     new_dst_path=new_dst_path,
@@ -1306,6 +1311,7 @@ def main(ctx: ChemRegridContext) -> None:
         # Initialize context with dummy paths (they get overwritten in the loop)
         context = RaveToMpasRegridContext(
             dataset_name=dataset_name,
+            workdir=workdir,
             src_path=Path("dummy"),
             dst_path=dst_path,
             new_dst_path=Path("dummy"),
@@ -1358,25 +1364,26 @@ def main(ctx: ChemRegridContext) -> None:
         files_to_cat = rave_paths
         _LOGGER.info(f"will cat files: {files_to_cat=}")
         if COMM.rank == 0:
-           ds = xr.open_mfdataset(files_to_cat, combine='nested', concat_dim='file')
-           # 2. Calculate the nanmean across the new 'file' dimension
-           # skipna=True (default) ensures it behaves like np.nanmean
-           ds_averaged = ds['AOD'].mean(dim='file', skipna=True)
-           print(ds_averaged)
+           with xr.open_mfdataset(files_to_cat, combine='nested', concat_dim='file') as ds:
+               # 2. Calculate the nanmean across the new 'file' dimension
+               # skipna=True (default) ensures it behaves like np.nanmean
+               ds_averaged = ds['AOD'].mean(dim='file', skipna=True)
+           # _LOGGER.debug(ds_averaged)
            ds_averaged.encoding.update({
               'dtype': 'float32',
               '_FillValue': -999
            })
-           ds_averaged.to_netcdf(Path(output_dir + '/test_goes_aod_merged.nc'))
+           ds_averaged.to_netcdf(output_dir / 'test_goes_aod_merged.nc')
 
         if not rave_paths:
-            _LOGGER.info(f"No matching GOES files found for {date_to_process} (even after lookback).")
-            raise ValueError
+            msg = f"No matching GOES files found for {date_to_process} (even after lookback)."
+            _LOGGER.error(msg)
+            raise ValueError(msg)
 
-        print('Reading merged GOES file:', 'test_goes_aod_merged.nc')
+        _LOGGER.info('Reading merged GOES file: test_goes_aod_merged.nc')
         #rave_path = rave_paths[0]
-        rave_path = Path(output_dir + "/test_goes_aod_merged.nc")
-        new_dst_path = Path(output_dir + "/" + mesh_name + "-GOES-" + date_to_process + ".nc")
+        rave_path = output_dir / "test_goes_aod_merged.nc"
+        new_dst_path = output_dir / (mesh_name + "-GOES-" + date_to_process + ".nc")
         # --- OPTIMIZATION START ---
         if processor is None:
             # FIRST PASS: Full Initialization
@@ -1384,6 +1391,7 @@ def main(ctx: ChemRegridContext) -> None:
 
             context = RaveToMpasRegridContext(
                 dataset_name=dataset_name,
+                workdir=workdir,
                 src_path=rave_path,
                 dst_path=dst_path,
                 new_dst_path=new_dst_path,
@@ -1428,12 +1436,13 @@ def main(ctx: ChemRegridContext) -> None:
 
     elif dataset_name == "FMC":
         for date_to_process in dates_needed:
-            rave_paths = glob.glob(str(input_dir) + "fmc_" + date_to_process + ".nc")
-            rave_path = rave_paths[0]
-            new_dst_path = Path(str(output_dir) + "fmc_" + date_to_process + "_" + mesh_name + ".nc")
+            rave_paths = glob.glob(str(input_dir / ("fmc_" + date_to_process + ".nc")))
+            rave_path = Path(rave_paths[0])
+            new_dst_path = output_dir / ("fmc_" + date_to_process + "_" + mesh_name + ".nc")
 
             context = RaveToMpasRegridContext(
                 dataset_name=dataset_name,
+                workdir=workdir,
                 src_path=rave_path,
                 dst_path=dst_path,
                 new_dst_path=new_dst_path,
@@ -1467,10 +1476,11 @@ def main(ctx: ChemRegridContext) -> None:
             _LOGGER.info("success")
 #
     elif dataset_name == "GRA2PES":
-        rave_path = Path(str(input_dir) + "/GRA2PESv1.0_total_2021" + MM + "_" + DOWs + "_00to11Z.nc")
-        new_dst_path = Path(str(output_dir) + "/" + dataset_name + "v1.0_total_" + mesh_name + "_00to11Z.nc")
+        rave_path = input_dir / ("GRA2PESv1.0_total_2021" + MM + "_" + DOWs + "_00to11Z.nc")
+        new_dst_path = output_dir / (dataset_name + "v1.0_total_" + mesh_name + "_00to11Z.nc")
         context = RaveToMpasRegridContext(
             dataset_name=dataset_name,
+            workdir=workdir,
             src_path=rave_path,
             dst_path=dst_path,
             new_dst_path=new_dst_path,
@@ -1503,10 +1513,11 @@ def main(ctx: ChemRegridContext) -> None:
 
         _LOGGER.info("success")
 
-        rave_path = Path(str(input_dir) + "/GRA2PESv1.0_total_2021" + MM + "_" + DOWs + "_12to23Z.nc")
-        new_dst_path = Path(str(output_dir) + "/" + dataset_name + "v1.0_total_" + mesh_name + "_12to23Z.nc")
+        rave_path = input_dir / ("GRA2PESv1.0_total_2021" + MM + "_" + DOWs + "_12to23Z.nc")
+        new_dst_path = output_dir / (dataset_name + "v1.0_total_" + mesh_name + "_12to23Z.nc")
         context = RaveToMpasRegridContext(
             dataset_name=dataset_name,
+            workdir=workdir,
             src_path=rave_path,
             dst_path=dst_path,
             new_dst_path=new_dst_path,
@@ -1541,29 +1552,30 @@ def main(ctx: ChemRegridContext) -> None:
 
     else:
         if dataset_name == "PECM":
-            rave_path = Path(str(input_dir) + "/pollen_obs_" + YYYY + "_BELD6_ef_T_" + JJJ + ".nc")
-            new_dst_path = Path(str(output_dir) + "/pollen_ef_" + mesh_name + "_" + YYYY + "_" + JJJ + ".nc")
+            rave_path = input_dir / ("pollen_obs_" + YYYY + "_BELD6_ef_T_" + JJJ + ".nc")
+            new_dst_path = output_dir / ("pollen_ef_" + mesh_name + "_" + YYYY + "_" + JJJ + ".nc")
         elif dataset_name == "NEMO_RWC":
-            rave_path = Path(str(input_dir) + "/NEMO_RWC_POC_PEC_PMOTHR.annual.2017.nc")
-            new_dst_path = Path(str(output_dir) + "/NEMO_RWC_ANNUAL_TOTAL_" + mesh_name + ".nc")
+            rave_path = input_dir / "NEMO_RWC_POC_PEC_PMOTHR.annual.2017.nc"
+            new_dst_path = output_dir / ("NEMO_RWC_ANNUAL_TOTAL_" + mesh_name + ".nc")
         elif dataset_name == "NEMO_ANTHRO":
-            rave_path = Path(str(input_dir) + "/NEMO_ANTHRO_" + mesh_name + "_" + YYYY + MM + DD + HH + "_SECTORSUM.nc")
-            new_dst_path = Path(str(output_dir) + "/NEMO_ANTHRO_" + mesh_name + ".nc")
+            rave_path = input_dir / ("NEMO_ANTHRO_" + mesh_name + "_" + YYYY + MM + DD + HH + "_SECTORSUM.nc")
+            new_dst_path = output_dir / ("NEMO_ANTHRO_" + mesh_name + ".nc")
         elif dataset_name == "NARR":
-            rave_path = Path(str(input_dir) + "/rwc_emission_denominator.2017.nc")
-            new_dst_path = Path(str(output_dir) + "/NEMO_RWC_DENOMINATOR_2017_" + mesh_name + ".nc")
+            rave_path = input_dir / "rwc_emission_denominator.2017.nc"
+            new_dst_path = output_dir / ("NEMO_RWC_DENOMINATOR_2017_" + mesh_name + ".nc")
         elif dataset_name == "ECOREGION":
-            rave_path = Path(str(input_dir) + "/veg_map.nc")
-            new_dst_path = Path(str(output_dir) + "/ecoregions_" + mesh_name + "_mpas.nc")
+            rave_path = input_dir / "veg_map.nc"
+            new_dst_path = output_dir / ("ecoregions_" + mesh_name + "_mpas.nc")
         elif dataset_name == "FENGSHA_2D":
-            rave_path = Path(str(input_dir) + "/FENGSHA_RRFS_NA_3km_2026_2D.nc")
-            new_dst_path = Path(str(output_dir) + "/fengsha_dust_inputs.2D."+ mesh_name + ".nc")
+            rave_path = input_dir / "FENGSHA_RRFS_NA_3km_2026_2D.nc"
+            new_dst_path = output_dir / ("fengsha_dust_inputs.2D."+ mesh_name + ".nc")
         elif dataset_name == "FENGSHA_2D_Time":
-            rave_path = Path(str(input_dir) + "/FENGSHA_RRFS_NA_3km_2026_2D_Time.nc")
-            new_dst_path = Path(str(output_dir) + "/fengsha_dust_inputs.2D_Time."+ mesh_name + ".nc")
+            rave_path = input_dir / "FENGSHA_RRFS_NA_3km_2026_2D_Time.nc"
+            new_dst_path = output_dir / ("fengsha_dust_inputs.2D_Time."+ mesh_name + ".nc")
 
         context = RaveToMpasRegridContext(
             dataset_name=dataset_name,
+            workdir=workdir,
             src_path=rave_path,
             dst_path=dst_path,
             new_dst_path=new_dst_path,
