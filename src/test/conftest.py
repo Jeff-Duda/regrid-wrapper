@@ -53,6 +53,7 @@ def create_analytic_data_array(
     lon_mesh: np.ndarray,
     lat_mesh: np.ndarray,
     ntime: int | None = None,
+    nlevel: int | None = None,
 ) -> xr.DataArray:
     deg_to_rad = 3.141592653589793 / 180.0
     analytic_data = 2.0 + np.cos(deg_to_rad * lon_mesh) ** 2 * np.cos(2.0 * deg_to_rad * (90.0 - lat_mesh))
@@ -61,6 +62,11 @@ def create_analytic_data_array(
         analytic_data = analytic_data.reshape([1] + list(analytic_data.shape))
         analytic_data = np.repeat(analytic_data, ntime, axis=0)
         analytic_data = time_modifier * analytic_data
+    if nlevel is not None:
+        level_modifier = np.arange(1, nlevel + 1).reshape(nlevel, 1, 1)
+        analytic_data = np.expand_dims(analytic_data, axis=1)
+        analytic_data = np.repeat(analytic_data, nlevel, axis=1)
+        analytic_data = level_modifier * analytic_data
     return xr.DataArray(
         analytic_data,
         dims=dims,
