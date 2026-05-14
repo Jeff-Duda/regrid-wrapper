@@ -762,7 +762,7 @@ class RaveToMpasRegridProcessor:
         # GRA2PES PM, convert from metric tons/km2/hr to ug/m2/s
         if self.context.dataset_name == "GRA2PES" and field_name in ("PM25-PRI", "PM10-PRI"):
             conv_aer = 1.e6 / 3600.
-        # GRA2PES methane, convert from moles/km2/hr to ug/m2/s
+        # GRA2PES gases, convert from moles/km2/hr to moles/m2/s
         elif self.context.dataset_name == "GRA2PES" and field_name in ("HC01", "SO2", "CO", "NH3", "NOX"):
             conv_aer = 1.e-6 / 3600.
         # RAVE methane, convert from kg/hr to mol/m2/s
@@ -780,9 +780,12 @@ class RaveToMpasRegridProcessor:
         elif self.context.dataset_name == "NEMO_RWC" and field_name in ("PEC","POC","PMOTHR","PMC"):
             # Convert g/s/km2 (on 1km grid) to ug/m2/s -->
             conv_aer = 1.0
-        elif self.context.dataset_name == "NEMO_ANTHRO" and field_name in ("PEC","POC","PMOTHR","PMC"):
+        elif self.context.dataset_name == "NEMO_ANTHRO" and field_name in ("PEC","POC","PMOTHR","PMC","PAL","PCA","PCL","PFE","PK","PMG","PMN","PNA","PNCOM","PNH4","PNO3","PSI","PSO4","PTI"):
             # Convert g/s/km2 to ug/m2/s -->
             conv_aer = 1.0
+        elif self.context.dataset_name == "NEMO_ANTHRO" and field_name in ("CO","NO2","NO","HONO","CH4","NH3","NH3_FERT","TERP","ISOP","IVOC"):
+            # Convert moles/km2/s to moles/m2/s -->
+            conv_aer = 1.e-6
         else:
             conv_aer = 1.0
 
@@ -822,7 +825,7 @@ class RaveToMpasRegridProcessor:
         _LOGGER.info("Initializing MPAS Destination Mesh (Once)")
         esmpy.Manager(debug=True)
 
-        # if not self.context.scrip_path.exists() and self.context.rank == 0:
+        #if not self.context.scrip_path.exists() and self.context.rank == 0:
         #     _LOGGER.info("writing mpas scrip grid")
         #     mpas_desc = MpasCellMeshDescriptor(
         #         str(self.context.dst_path), self.context.mesh_name + ".init"
@@ -1093,7 +1096,7 @@ def main(ctx: ChemRegridContext) -> None:
         InterpMethod = "CONSERVE"
         # InterpMethod = "BILINEAR"
     elif dataset_name == "NEMO_ANTHRO":
-        field_names = ("POC", "PEC", "PMOTHR", "PMC")
+        field_names = ("POC", "PEC", "PMOTHR", "PMC","CO","NH3","SO2","NO","NO2","PAL","PCA","PCL","PFE","PK","PMG","PMN","PNA","PNCOM","PNH4","PNO3","PSI","PSO4","PTI")
         x_center = "lon"
         y_center = "lat"
         x_dim = "COL"
