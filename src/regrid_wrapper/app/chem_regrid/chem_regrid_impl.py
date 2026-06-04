@@ -35,6 +35,12 @@ from regrid_wrapper.esmpy.field_wrapper import (
 
 _LOGGER = LOGGER.getChild("mpas-regrid")
 
+NGFS_OUTPUT_NAMES = {
+    "FRE": "fre_in",
+    "FRP_MEAN": "frp_in",
+    "PM25": "e_bb_in_smoke_fine",
+}
+
 # Try to find the latest RAVE file available up to max_lookback_hours before target_time_str
 # to avoid setting zeroes when a particular hour file is missing.
 def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, dataset_name, max_lookback_hours=24):
@@ -272,8 +278,6 @@ class RaveToMpasRegridContext(BaseModel):
                 if self.dataset_name == "NGFS" and field_name == "PM25":
                     read_name = "EMIS_PM25"
                 field_level_out_size = self.level_out_size
-                if self.dataset_name == "NGFS" and field_name in ("FRE", "FRP_MEAN"):
-                    field_level_out_size = 0
 
                 if read_name not in ds.variables:
                     raise KeyError(
@@ -983,8 +987,9 @@ class RaveToMpasRegridProcessor:
             dims = rave_field.create_dimension_collection(reconciled_bounds)
 
             with open_nc(self.context.new_dst_path, mode="a") as ds:
+                output_var_name = NGFS_OUTPUT_NAMES.get(rave_field.name, rave_field.name)
                 var = ds.createVariable(
-                    rave_field.name, # Keep it as standard name in output!
+                    output_var_name,
                     rave_field.dtype,
                     [dim.name[0] for dim in dims.value],
                     fill_value=rave_field.fill_value,
