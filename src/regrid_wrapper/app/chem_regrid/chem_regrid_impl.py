@@ -35,6 +35,12 @@ from regrid_wrapper.esmpy.field_wrapper import (
 
 _LOGGER = LOGGER.getChild("mpas-regrid")
 
+NGFS_OUTPUT_NAMES = {
+    "FRE": "fre_in",
+    "FRP_MEAN": "frp_in",
+    "PM25": "e_bb_in_smoke_fine",
+}
+
 # Try to find the latest RAVE file available up to max_lookback_hours before target_time_str
 # to avoid setting zeroes when a particular hour file is missing.
 def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, dataset_name, max_lookback_hours=24):
@@ -230,7 +236,7 @@ class RaveField3d_plusTime(AbstractRaveField):
             )
         )
     def reshape_field_data(self, target: np.ndarray) -> np.ndarray:
-        raise NotImplementedError
+        return target.reshape(self.time_size, -1, self.level_out_size)
 
 class RaveToMpasRegridContext(BaseModel):
     dataset_name: str
@@ -271,6 +277,7 @@ class RaveToMpasRegridContext(BaseModel):
                 read_name = field_name
                 if self.dataset_name == "NGFS" and field_name == "PM25":
                     read_name = "EMIS_PM25"
+                field_level_out_size = self.level_out_size
 
                 if read_name not in ds.variables:
                     raise KeyError(
@@ -283,11 +290,11 @@ class RaveToMpasRegridContext(BaseModel):
                     "fill_value": -1.0,
                     "dtype": var.dtype,
                     "level_out_name": self.level_out_name,
-                    "level_out_size": self.level_out_size,
+                    "level_out_size": field_level_out_size,
                     "time_size": self.time_size,
                     "num_cells": self.num_cells,
                 }
-                if self.level_out_size == 0:
+                if field_level_out_size == 0:
                    if self.time_size == 0:
                       app = RaveField2d.model_validate(init_data)
                    else:
@@ -491,33 +498,7 @@ class RaveToMpasRegridProcessor:
     def run(self) -> None:
         _LOGGER.info("apply regridding")
 
-        _LOGGER.info("create output file")
-        if self.context.rank == 0:
-            with open_nc(self.context.new_dst_path, mode="w", clobber=True, parallel=False) as dst_nc:
-                dst_nc.createDimension("nCells", self.context.num_cells)
-                if self.context.level_out_name != "None":
-                    dst_nc.createDimension(self.context.level_out_name, self.context.level_out_size)
-                dst_nc.createDimension("StrLen", 64)
-                if self.context.time_size > 1:
-                    dst_nc.createDimension("Time", self.context.time_size)
-                elif self.context.time_size == 1:
-                    if "Time" not in dst_nc.dimensions:
-                        dst_nc.createDimension("Time")
-                    _LOGGER.info("Not creating a time dimension")
-                dst_nc.setncattr("created_at", str(datetime.now(timezone.utc)))
-                dst_nc.setncattr("src_path", str(self.context.src_path))
-                dst_nc.setncattr("dst_path", str(self.context.dst_path))
-
-                with open_nc(self.context.dst_path, mode="r", parallel=False) as src_nc:
-                    if self.context.dataset_name in ("RAVE"):
-                        for varname in ("latCell", "lonCell", "areaCell", "xtime"):
-                            copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
-                    elif self.context.dataset_name in ("FENGSHA_2D"):
-                        for varname in ("latCell", "lonCell"):
-                            copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
-                    else:
-                        for varname in ("latCell", "lonCell", "xtime"):
-                            copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
+        self.create_output_file()
 
         regridder = self.get_regridder()
         for rave_field in self.context.rave_fields:
@@ -820,8 +801,47 @@ class RaveToMpasRegridProcessor:
             raise ValueError
         return self._regridder
 
+    def create_output_file(self) -> None:
+        _LOGGER.info("create output file")
+        if self.context.rank != 0:
+            return
+
+        with open_nc(self.context.new_dst_path, mode="w", clobber=True, parallel=False) as dst_nc:
+            dst_nc.createDimension("nCells", self.context.num_cells)
+            if self.context.level_out_name != "None":
+                dst_nc.createDimension(self.context.level_out_name, self.context.level_out_size)
+            dst_nc.createDimension("StrLen", 64)
+            if self.context.time_size > 1:
+                dst_nc.createDimension("Time", self.context.time_size)
+            elif self.context.time_size == 1:
+                if "Time" not in dst_nc.dimensions:
+                    dst_nc.createDimension("Time")
+                _LOGGER.info("Not creating a time dimension")
+            dst_nc.setncattr("created_at", str(datetime.now(timezone.utc)))
+            dst_nc.setncattr("src_path", str(self.context.src_path))
+            dst_nc.setncattr("dst_path", str(self.context.dst_path))
+
+            if self.context.dataset_name in ("RAVE", "NGFS"):
+                base_vars = ("latCell", "lonCell", "areaCell", "xtime")
+            elif self.context.dataset_name in ("FENGSHA_2D"):
+                base_vars = ("latCell", "lonCell")
+            else:
+                base_vars = ("latCell", "lonCell", "xtime")
+
+            with open_nc(self.context.dst_path, mode="r", parallel=False) as src_nc:
+                for varname in base_vars:
+                    if varname in src_nc.variables:
+                        copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
+                    else:
+                        _LOGGER.warning(
+                            f"Destination static file does not contain {varname}; skipping copy."
+                        )
+
     def init_destination_only(self) -> None:
         """Loads the heavy MPAS destination mesh once for dynamic NGFS processing."""
+        if self._dst_field is not None:
+            return
+
         _LOGGER.info("Initializing MPAS Destination Mesh (Once)")
         esmpy.Manager(debug=True)
 
@@ -832,25 +852,52 @@ class RaveToMpasRegridProcessor:
         #     )
         #     mpas_desc.to_scrip(str(self.context.scrip_path))
 
-        _LOGGER.info("create destination mesh")
-        dst_mesh = esmpy.Mesh(
-            filename=str(self.context.scrip_path), filetype=esmpy.FileFormat.UGRID,
-            meshname="grid_topology"
-        )
+        if self._dst_mesh is None:
+            _LOGGER.info("create destination mesh")
+            self._dst_mesh = esmpy.Mesh(
+                filename=str(self.context.scrip_path), filetype=esmpy.FileFormat.UGRID,
+                meshname="grid_topology"
+            )
+        dst_mesh = self._dst_mesh
+        local_bounds = reconcile_bounds((0, dst_mesh.size_owned[1]))
 
-        # Create destination field (using logic from your original initialize method)
-        if self.context.level_out_size > 1 and self.context.time_size > 1:
-            self._dst_field = esmpy.Field(dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT, ndbounds=(self.context.level_out_size, self.context.time_size))
-        elif self.context.level_out_size > 1 and self.context.time_size == 1:
-            self._dst_field = esmpy.Field(dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT, ndbounds=(self.context.level_out_size,))
-        elif self.context.level_out_size == 1 and self.context.time_size > 1:
-            self._dst_field = esmpy.Field(dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT, ndbounds=(self.context.time_size,))
+        _LOGGER.info("create destination field")
+        cells_dim = Dimension(name=("nCells",),
+                          size=self.context.num_cells,
+                          lower=local_bounds[0],
+                          upper=local_bounds[1],
+                          staggerloc=esmpy.MeshLoc.ELEMENT,
+                          coordinate_type="element")
+        dims = [cells_dim]
+        time_dim = Dimension(name=("Time",), size=self.context.time_size, staggerloc=esmpy.StaggerLoc.CENTER, coordinate_type="time", lower=0, upper=self.context.time_size) if self.context.time_size > 0 else None
+        level_dim = Dimension(name=(self.context.level_out_name,), size=self.context.level_out_size, staggerloc=esmpy.StaggerLoc.CENTER, coordinate_type="level", lower=0, upper=self.context.level_out_size) if self.context.level_out_size > 0 else None
+        if self.context.level_out_size == 0:
+            if self.context.time_size == 0:
+                esmpy_dst_field = esmpy.Field(dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT)
+            else:
+                esmpy_dst_field = esmpy.Field(
+                    dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT, ndbounds=(self.context.time_size,)
+                )
+                dims.append(time_dim)
         else:
-            self._dst_field = esmpy.Field(dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT)
+            if self.context.time_size == 0:
+                esmpy_dst_field = esmpy.Field(
+                    dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT, ndbounds=(self.context.level_out_size,)
+                )
+                dims.append(level_dim)
+            else:
+                esmpy_dst_field = esmpy.Field(
+                    dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT, ndbounds=(self.context.level_out_size, self.context.time_size)
+                )
+                dims.append(level_dim)
+                dims.append(time_dim)
+        gwrap = MeshWrapper(value=dst_mesh, dims=DimensionCollection(value=[cells_dim]))
+        self._dst_field = FieldWrapper(value=esmpy_dst_field, gwrap=gwrap, dims=DimensionCollection(value=dims))
 
     def process_ngfs_file(self, file_path: Path, resolution: float = 0.01) -> None:
         """Dynamically builds a mesh for NGFS points, regrids, and writes the output."""
         _LOGGER.info(f"Processing NGFS file: {file_path}")
+        self.init_destination_only()
 
         # 1. Read NGFS Coordinates AND Area
         with open_nc(file_path, mode="r") as ds:
@@ -860,6 +907,8 @@ class RaveToMpasRegridProcessor:
             # Read the NGFS area (in km2)
             if 'GRID_AREA' in ds.variables:
                 grid_area = ds.variables['GRID_AREA'][:].filled(np.nan)
+            elif "PIXEL_AREA" in ds.variables:
+                grid_area = ds.variables["PIXEL_AREA"][:].filled(np.nan)
             else:
                 _LOGGER.warning("GRID_AREA not found! Defaulting to 1.0 km2.")
                 grid_area = np.ones_like(lats)
@@ -882,25 +931,9 @@ class RaveToMpasRegridProcessor:
         if src_mesh is None:
             return
 
-        # 3. Create Output NetCDF File (Header Info)
-        if self.context.rank == 0:
-            with open_nc(self.context.new_dst_path, mode="w", clobber=True, parallel=False) as dst_nc:
-                dst_nc.createDimension("nCells", self.context.num_cells)
-                dst_nc.createDimension(self.context.level_out_name, self.context.level_out_size)
-                dst_nc.createDimension("StrLen", 64)
-                if self.context.time_size > 1:
-                    dst_nc.createDimension("Time", self.context.time_size)
-                elif self.context.time_size == 1:
-                    dst_nc.createDimension("Time")
-                dst_nc.setncattr("created_at", str(datetime.now(timezone.utc)))
-                dst_nc.setncattr("src_path", str(self.context.src_path))
-                dst_nc.setncattr("dst_path", str(self.context.dst_path))
-
-                # Copy base MPAS variables
-                with open_nc(self.context.dst_path, mode="r", parallel=False) as src_nc:
-                    for varname in ("latCell", "lonCell", "areaCell", "xland", "xtime"):
-                        copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
-
+        # 3. Create Output NetCDF File using the same header rules as RAVE.
+        self.create_output_file()
+        dst_field = self.get_dst_field()
 
         # 4. Process Each Variable
         for rave_field in self.context.rave_fields:
@@ -940,23 +973,23 @@ class RaveToMpasRegridProcessor:
             # Create Dynamic Regridder
             regridder = esmpy.Regrid(
                 srcfield=src_field,
-                dstfield=self._dst_field,
+                dstfield=dst_field.value,
                 regrid_method=esmpy.RegridMethod.CONSERVE,
                 unmapped_action=esmpy.UnmappedAction.IGNORE
             )
 
             # Apply Regridding
-            self._dst_field.data.fill(0.0)
-            regridder(src_field, self._dst_field)
+            dst_field.value.data.fill(0.0)
+            regridder(src_field, dst_field.value)
 
             # Write to Output NetCDF
-            local_bounds = (self._dst_field.lower_bounds[0], self._dst_field.upper_bounds[0])
-            reconciled_bounds = reconcile_bounds(local_bounds)
+            reconciled_bounds = dst_field.dims.value[0].bounds
             dims = rave_field.create_dimension_collection(reconciled_bounds)
 
             with open_nc(self.context.new_dst_path, mode="a") as ds:
+                output_var_name = NGFS_OUTPUT_NAMES.get(rave_field.name, rave_field.name)
                 var = ds.createVariable(
-                    rave_field.name, # Keep it as standard name in output!
+                    output_var_name,
                     rave_field.dtype,
                     [dim.name[0] for dim in dims.value],
                     fill_value=rave_field.fill_value,
@@ -966,11 +999,12 @@ class RaveToMpasRegridProcessor:
 
                 # Multiply by areaCell for Power/Energy variables (back to total W in cell)
                 if rave_field.name in ("FRP_MEAN", "FRE"):
-                    area = np.asarray(ds.variables['areaCell'])
-                    area_subset = area[reconciled_bounds[0]:reconciled_bounds[1]]
-                    set_variable_data(var, dims, rave_field.reshape_field_data(self._dst_field.data * area_subset), collective=True)
+                    area_dims = DimensionCollection(value=[dims.get("nCells")])
+                    area_subset = load_variable_data(ds.variables['areaCell'], area_dims)
+                    area_subset = area_subset.reshape(dst_field.dims.shape_local)
+                    set_variable_data(var, dims, rave_field.reshape_field_data(dst_field.value.data * area_subset), collective=True)
                 else:
-                    set_variable_data(var, dims, rave_field.reshape_field_data(self._dst_field.data), collective=True)
+                    set_variable_data(var, dims, rave_field.reshape_field_data(dst_field.value.data), collective=True)
 
             # Clean up memory
             regridder.destroy()
@@ -1350,9 +1384,8 @@ def main(ctx: ChemRegridContext) -> None:
         processor = RaveToMpasRegridProcessor(context=context)
 
         for date_to_process in dates_needed:
-            # Construct the filename (Adjust the prefix 'ngfs_' if your files are named differently)
-            # print("GAF debug: attempting to read: " + input_dir + "/NGFS_v0.31_" + date_to_process + "_0p01.nc")
-            ngfs_paths = glob.glob(str(input_dir) + "/NGFS_v0.31_0p01_" + date_to_process + "0000.nc")
+            
+            ngfs_paths = glob.glob(str(input_dir) + "/ngfs_processed_" + date_to_process + "0000.nc")
 
             if not ngfs_paths:
                 print(f"ERROR: Missing NGFS file for {date_to_process}. Skipping.")
