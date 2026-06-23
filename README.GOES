@@ -1,0 +1,7 @@
+NOTE: GOES satellite data do not contain coordinate information. Therefore it must be provided by the user. Luckily, coordinate files exist, but you must manually download them.
+
+GOES coordinate files can be accessed from links at this URL: https://www.star.nesdis.noaa.gov/atmospheric-composition-training/satellite_data_goes_imager_projection.php
+
+Either download all available files linked on that page or you may download the file corresponding to the specific satellite (as of 2026, GOES-18 or GOES-19) and sector (Full Disk or CONUS).
+
+You should then create a link to these files in your run directory when running the regridder program.

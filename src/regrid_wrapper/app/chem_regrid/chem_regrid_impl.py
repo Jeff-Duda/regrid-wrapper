@@ -43,7 +43,7 @@ NGFS_OUTPUT_NAMES = {
 
 # Try to find the latest RAVE file available up to max_lookback_hours before target_time_str
 # to avoid setting zeroes when a particular hour file is missing.
-def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, dataset_name, max_lookback_hours=24):
+def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, dataset_name, max_lookback_hours=24, **kwargs):
     """Return list of files for the latest time <= target_time_str."""
     fmt = "%Y%m%d%H"  #RAVE
     fmt2= "%Y%j%H"  # GOES
@@ -63,9 +63,22 @@ def find_latest_rave_file(input_dir, target_time_str, ebb_dcycle, dataset_name, 
         if dataset_name == "RAVE":
            this_str = this_time.strftime(fmt)
            paths = glob.glob(input_dir_str + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+this_str+"*")
-        elif dataset_name == "GOES":
+        elif "GOES" in dataset_name:
+           valid_args = False
+           if 'sat_num' in kwargs.keys():
+              SAT_NUM = kwargs['sat_num']
+              valid_args = True
+           if 'product' in kwargs.keys():
+              PRODUCT_CODE = kwargs['product']
+              valid_args = True
+           if len(kwargs) > 2:
+              print("More than 2 optional keyward arguments were passed into find_latest_rave_file. Some will not be used. Check syntax.")
+              for key,item in kwargs.items():
+                 print(key,item)
+           if not valid_args:
+              raise KeyError("Incorrect keyward arguments to find_latest_rave_file. If dataset_name = 'GOES', you must provide additional kwargs on the satellite number and product")
            this_str = this_time.strftime(fmt2)
-           paths = glob.glob(input_dir_str + "/OR_ABI-L2-AODC-M6_G18_s"+this_str+"*")
+           paths = glob.glob(f"{input_dir_str}/OR_ABI-L2-{PRODUCT_CODE}C-M6_G{SAT_NUM}_s"+this_str+"*")
         if paths:
             if h > 0:
                 print(f"Missing {dataset_name} file for {target_time_str}, using {this_str} instead")
@@ -348,11 +361,7 @@ class RaveToMpasRegridProcessor:
         #     )
         #     mpas_desc.to_scrip(str(self.context.scrip_path))
 
-# JLS - temporary fix for coords not in file
-        if self.context.dataset_name == "GOES":
-           pathsrc=self.context.workdir / "goes19_abi_conus_interpolated_lat_lon.nc"
-        else:
-           pathsrc=self.context.src_path
+        pathsrc=self.context.src_path
         _LOGGER.info("create source grid")
         if self.context.x_corner_dim is None:
             self._src_gwrap = NcToGrid(
@@ -1264,12 +1273,19 @@ def main(ctx: ChemRegridContext) -> None:
         time_name = "time"
         time_size = 1
         InterpMethod = "BILINEAR"
-    elif dataset_name == "GOES":
-        field_names = ("AOD",)
+    elif "GOES" in dataset_name:
+        if "AOD" in dataset_name:
+           field_names = ("AOD",)
+           prod_code = "AOD"
+        elif "ADP" in dataset_name:
+           field_names = ("Smoke",)
+           prod_code = "ADP"
+        else:
+           raise Exception("Other GOES products are not yet supported. You'll need to add them.")
         x_center = "longitude"
         y_center = "latitude"
-        x_dim = "x"
-        y_dim = "y"
+        x_dim = "columns"
+        y_dim = "rows"
         x_corner = None
         y_corner = None
         x_corner_dim = None
@@ -1280,6 +1296,14 @@ def main(ctx: ChemRegridContext) -> None:
         time_name = "None"
         time_size = 0
         InterpMethod = "BILINEAR"
+        if "WEST" in dataset_name:
+           sat_num = "18"
+           coord_file_name = "goes18_abi_conus_lat_lon.nc"
+        elif "EAST" in dataset_name:
+           sat_num = "19"
+           coord_file_name = "goes19_abi_conus_interpolated_lat_lon.nc"
+        else:
+           raise Exception("Dataset name does not specify a satellite location. Must include either 'EAST' or 'WEST'")
         dates_needed = []
         for i in range(25):
             if ebb_dcycle == 1: # Same-day emissions
@@ -1408,32 +1432,41 @@ def main(ctx: ChemRegridContext) -> None:
 
         _LOGGER.info("NGFS success")
 
-    elif dataset_name == "GOES":
+    elif "GOES" in dataset_name:
         processor = None
         date_to_process = dates_needed[0]
-        rave_paths = find_latest_rave_file(input_dir, date_to_process, -1, dataset_name, max_lookback_hours=2)
+        rave_paths = find_latest_rave_file(input_dir, date_to_process, -1, dataset_name, max_lookback_hours=2, sat_num=sat_num, product=prod_code)
         files_to_cat = rave_paths
         _LOGGER.info(f"will cat files: {files_to_cat=}")
         if COMM.rank == 0:
            with xr.open_mfdataset(files_to_cat, combine='nested', concat_dim='file') as ds:
                # 2. Calculate the nanmean across the new 'file' dimension
                # skipna=True (default) ensures it behaves like np.nanmean
-               ds_averaged = ds['AOD'].mean(dim='file', skipna=True)
+               ds_averaged = ds[field_names[0]].mean(dim='file', skipna=True)
            # _LOGGER.debug(ds_averaged)
            ds_averaged.encoding.update({
               'dtype': 'float32',
               '_FillValue': -999
            })
-           ds_averaged.to_netcdf(output_dir / 'test_goes_aod_merged.nc')
+           ds_averaged.drop_vars(['x','y'])
+           ds_averaged = ds_averaged.rename({'y':'rows','x':'columns'})
+           ds_averaged.to_netcdf(output_dir / f'GOES_{prod_code}_merged.nc')
+           coord_file = f"{workdir}/{coord_file_name}"
+           if not isfile(coord_file):
+              raise Exception(
+ """If processing GOES AOD/ADP data, you must provide the GOES coordinate data files, which
+ are not provided by this repository. Instructions for obtaining them can be found in README.GOES in the root directory.""")
+           ds_coords = xr.open_dataset(coord_file,engine='netcdf4')
+           ds_coords.to_netcdf(output_dir / f'GOES_{prod_code}_merged.nc',mode='a')
 
         if not rave_paths:
             msg = f"No matching GOES files found for {date_to_process} (even after lookback)."
             _LOGGER.error(msg)
             raise ValueError(msg)
 
-        _LOGGER.info('Reading merged GOES file: test_goes_aod_merged.nc')
+        _LOGGER.info(f'Reading merged GOES file: GOES_{prod_code}_merged.nc')
         #rave_path = rave_paths[0]
-        rave_path = output_dir / "test_goes_aod_merged.nc"
+        rave_path = output_dir / f"GOES_{prod_code}_merged.nc"
         new_dst_path = output_dir / (mesh_name + "-GOES-" + date_to_process + ".nc")
         # --- OPTIMIZATION START ---
         if processor is None:
